@@ -1,0 +1,9 @@
+> initRemote
+> run v1
+$ exists .source-deps/repo/example/greeter_3
+
+# a new upstream commit is only picked up after an explicit sourceDepsUpdate
+> commitV2
+> run v1
+> sourceDepsUpdate
+> run v2

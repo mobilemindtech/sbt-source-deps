@@ -1,0 +1,6 @@
+target/
+.bsp/
+.source-deps/
+.metals/
+.bloop/
+.idea/

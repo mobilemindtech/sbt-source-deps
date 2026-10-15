@@ -55,6 +55,8 @@ $ copy-file changes/Greeter.scala greeter/...
 | `maven-revision` | `${revision}` with a `-SNAPSHOT` version, without `flatten-maven-plugin`: timestamped files and placeholders in the deployed POMs |
 | `gradle-multi` | Multi-project build, `core` depends on `project(':api')`; a change in `api` comes through `core` |
 | `mill-cross` | `Cross[...]` modules for 2.13 and 3, consumed by a 2.13 and a 3 project: each gets only its own artifacts |
+| `gradle-kotlin` | `build.gradle.kts` with the `scala` plugin (a Scala 2.13 library, used from Scala 3) |
+| `env-sbt` | `sourceDepsEnv` reaches the build (a source generator reads it); changing it rebuilds |
 | `build-errors` | Message when the tool command does not exist, and when an sbt build publishes nothing (`publish / skip`) |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
 | `local-gradle` | Plain `java-library` without publishing configuration |
@@ -212,6 +214,19 @@ Tried with app → middle (uses the plugin) → greeter. Findings, in order:
   the builders turn it into a message with the `sourceDepsCommands` line to add.
 - In sbt 2, `Result` is an enum: match on `Result.Inc(i)` / `Result.Value(v)` in build files.
 
+### Environment and JDK (2026-10-15)
+
+- `sourceDepsEnv` was not part of the fingerprint, so changing `JAVA_HOME` did not rebuild anything.
+  It is now. Nested records store the nested build's own `sourceDepsEnv`, so the outer build computes
+  the same suffixes as the nested one.
+- Checked by hand with `JAVA_HOME` set to JDK 17: the nested sbt still ran on Java 27. The sbt runner
+  uses the `java` on the `PATH` and only switches with `--java-home`. The builders now pass
+  `--java-home` to sbt, and put `$JAVA_HOME/bin` first on the `PATH` of every tool. Afterwards the
+  nested sbt printed "Java 17.0.17". Not a scripted test, because it depends on the JDKs installed.
+- Gradle 9.8 + Scala 3.8: `8 is not a valid choice for -Xunchecked-java-output-version`, with the Java
+  arguments at `-source 17 -target 17`, on JDK 25 and 27, and with `ScalaCompile` options. Not
+  investigated further; `gradle-kotlin` uses a Scala 2.13 library.
+
 ### Scaladoc and `lmcoursier`
 
 `publishLocal` of the plugin failed in `Compile / doc` ("undefined: new dataclass.data"). The
@@ -238,13 +253,15 @@ plugin's docs are disabled for now.
   - tests for Maven `${revision}` + SNAPSHOT, Gradle multi-project, Mill `Cross` modules;
   - timestamped SNAPSHOTs; per-Scala-version selection of cross-published modules;
   - `.partialClone`; clear errors for a missing tool and for builds that publish nothing.
+- Roadmap item 1 (tests): Gradle Kotlin DSL + `scala` plugin; `sourceDepsEnv` in the fingerprint;
+  `JAVA_HOME` honoured by sbt and on the `PATH`.
 
-**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the fourteen scripted tests above (the sbt 1.x
+**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the sixteen scripted tests above (the sbt 1.x
 dependency with sbt 1.13.0).
 
 **Not verified yet**
-- Gradle builds publishing several Scala versions (Scala plugin with variants), Gradle Kotlin DSL;
-- `sourceDepsEnv` with a different `JAVA_HOME`;
+- Gradle builds publishing several Scala versions through variants (not supported);
+- `JAVA_HOME` with Maven, Gradle, Mill and scala-cli (checked by hand with sbt only);
 - macOS and Windows (paths, wrapper scripts, `sh` fallback).
 
 ## Roadmap

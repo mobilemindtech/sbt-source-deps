@@ -1,0 +1,6 @@
+> run v1
+$ exists .source-deps/repo/example/greeter
+> sourceDepsStatus
+
+$ copy-file changes/Greeter.scala greeter/src/main/scala/greeter/Greeter.scala
+> run v2

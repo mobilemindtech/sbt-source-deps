@@ -161,6 +161,12 @@ The generated init script does the following for every project with the `java` p
   set `JAVA_HOME` if needed.
 - Android and Kotlin Multiplatform projects are not supported.
 - Set `version` in the build. Without it, Gradle publishes `unspecified`.
+- Groovy and Kotlin DSL (`build.gradle.kts`) both work.
+- Scala libraries built with Gradle's `scala` plugin are published without a Scala suffix
+  (`greeter`, not `greeter_2.13`), as Gradle does. Builds publishing several Scala versions through
+  variants are not supported.
+- Gradle 9.8 could not compile Scala 3.8 in our tests ("8 is not a valid choice for
+  -Xunchecked-java-output-version", whatever the Java target): a Gradle limitation, not the plugin's.
 
 **Example**
 
@@ -238,10 +244,10 @@ Each tool is covered by a scripted test (`src/sbt-test/source-deps/`):
 
 | Tool | Version | Test |
 | --- | --- | --- |
-| sbt | 2.0.10 | `local-sbt`, `git-sbt`, `git-refs`, `nested-sbt`, `nested-cycle` |
+| sbt | 2.0.10 | `local-sbt`, `git-sbt`, `git-refs`, `nested-sbt`, `nested-cycle`, `env-sbt` |
 | sbt | 1.13.0 | `sbt1-cross` |
 | Maven | 3.9.9 | `local-maven` (reactor with parent), `maven-revision` (`${revision}`, SNAPSHOT) |
-| Gradle | 9.8.0 | `local-gradle`, `gradle-multi` (multi-project) |
+| Gradle | 9.8.0 | `local-gradle`, `gradle-multi` (multi-project), `gradle-kotlin` (Kotlin DSL, `scala` plugin) |
 | Mill | 1.3.0 (via `./mill`) | `local-mill`, `mill-cross` (`Cross` modules, two consumer Scala versions) |
 | scala-cli | 1.16.0 (`scala` runner) | `local-scalacli` |
 

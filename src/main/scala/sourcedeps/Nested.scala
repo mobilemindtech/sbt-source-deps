@@ -2,6 +2,7 @@ package sourcedeps
 
 import java.io.File
 import java.util.Properties
+import scala.jdk.CollectionConverters.*
 
 /**
  * Support for dependencies whose own build uses this plugin (app -> middle -> greeter).
@@ -21,15 +22,15 @@ private[sourcedeps] object Nested:
   /** Deeper chains are almost certainly a cycle the ids cannot reveal (same project, different locations). */
   val MaxDepth = 16
 
-  /** A source dependency resolved by a nested build, with the Scala binary version it was resolved for. */
-  final case class Record(dep: SourceDep, scalaBinaryVersion: String)
+  /** A source dependency resolved by a nested build, with the Scala version and environment it was resolved for. */
+  final case class Record(dep: SourceDep, scalaBinaryVersion: String, env: Map[String, String])
 
   def chain: Seq[String] = sys.props.get(ChainProp).toSeq.flatMap(_.split(',')).filter(_.nonEmpty)
 
   def recordDir(home: File, variant: String): File = new File(home, s"nested-$variant")
 
   /** Called by the nested plugin: records `dep` when the outer build asked for it. */
-  def record(dep: SourceDep, scalaBinaryVersion: String): Unit =
+  def record(dep: SourceDep, scalaBinaryVersion: String, env: Map[String, String]): Unit =
     sys.props.get(RecordProp).foreach { dir =>
       val p = Properties()
       p.setProperty("id", dep.id)
@@ -44,6 +45,7 @@ private[sourcedeps] object Nested:
       dep.tool.foreach(t => p.setProperty("tool", t.toString))
       if dep.moduleFilter.nonEmpty then p.setProperty("modules", dep.moduleFilter.mkString(","))
       p.setProperty("scalaBinaryVersion", scalaBinaryVersion)
+      env.foreach((k, v) => p.setProperty(s"env.$k", v))
       val out = new File(dir, s"${dep.id}-$scalaBinaryVersion.properties")
       out.getParentFile.mkdirs()
       sbt.io.Using.fileOutputStream()(out)(p.store(_, "sbt-source-deps nested dependency"))
@@ -76,6 +78,7 @@ private[sourcedeps] object Nested:
             alias = Some(id),
             partial = get("git.partial").contains("true")
           ),
-          scala
+          scala,
+          p.stringPropertyNames.asScala.toSeq.collect { case k if k.startsWith("env.") => k.stripPrefix("env.") -> p.getProperty(k) }.toMap
         )
       }

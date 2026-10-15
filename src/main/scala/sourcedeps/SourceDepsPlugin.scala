@@ -64,9 +64,10 @@ object SourceDepsPlugin extends AutoPlugin:
     sourceDepsResolved := Def.uncached {
       val e = engine.value(streams.value.log)
       val binary = scalaBinaryVersion.value
+      val depsEnv = sourceDepsEnv.value
       sourceDependencies.value.map { dep =>
         val resolved = e.resolve(dep)
-        Nested.record(dep, binary)
+        Nested.record(dep, binary, depsEnv)
         resolved
       }
     },

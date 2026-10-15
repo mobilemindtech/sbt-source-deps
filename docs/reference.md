@@ -43,7 +43,7 @@ make sure it is unique.
 | `sourceDependencies` | project | `Nil` | The project's source dependencies. |
 | `sourceDepsDirectory` | build | `<root>/.source-deps` | Clones, work files and the isolated repository. |
 | `sourceDepsCommands` | build | see below | Command used to launch each tool when the dependency has no wrapper script. |
-| `sourceDepsEnv` | build | `Map.empty` | Extra environment variables for the build tools (not for git). |
+| `sourceDepsEnv` | build | `Map.empty` | Extra environment variables for the build tools (not for git). Part of the fingerprint. `JAVA_HOME` also goes first on the `PATH`, and to sbt as `--java-home`. |
 
 Default `sourceDepsCommands`:
 

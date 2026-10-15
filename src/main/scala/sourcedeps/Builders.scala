@@ -66,7 +66,7 @@ object Builders:
 
   private[sourcedeps] def runLogged(req: BuildRequest, tool: BuildTool, cmd: Seq[String]): Unit =
     req.log.info(s"[source-deps] ${req.label}: ${cmd.mkString(" ")}")
-    val r = Proc.run(cmd, req.projectDir, req.env.toSeq)(line => req.log.debug(s"[${req.label}] $line"))
+    val r = Proc.run(cmd, req.projectDir, processEnv(req.env).toSeq)(line => req.log.debug(s"[${req.label}] $line"))
     r.notStarted.foreach { reason =>
       val name = tool.toString
       throw ProcessFailed(
@@ -79,13 +79,25 @@ object Builders:
       r.out.takeRight(80).foreach(l => req.log.error(s"[${req.label}] $l"))
       throw ProcessFailed(s"build of ${req.label} failed (exit ${r.exitCode}) running: ${cmd.mkString(" ")}")
 
+  /**
+   * Most launch scripts (sbt's among them) run the `java` found on the PATH and ignore JAVA_HOME: when
+   * JAVA_HOME is set for the builds, its `bin` directory goes first on the PATH as well.
+   */
+  private[sourcedeps] def processEnv(env: Map[String, String]): Map[String, String] =
+    env.get("JAVA_HOME") match
+      case Some(home) if !env.contains("PATH") =>
+        val path = sys.env.get("PATH").fold("")(File.pathSeparator + _)
+        env.updated("PATH", new File(home, "bin").getAbsolutePath + path)
+      case _ => env
+
   private[sourcedeps] def fileUri(dir: File): String = dir.toURI.toString.replaceFirst("^file:/(?!/)", "file:///")
 
 object SbtBuilder extends Builder:
   def publish(req: BuildRequest): Unit =
     val globalSettings = prepareGlobalSettings(req)
     val cmd = Builders.launcher(req, BuildTool.Sbt, None) ++ Seq(
-      "--server", "--batch", "--no-colors", "--supershell=never",
+      "--server", "--batch", "--no-colors", "--supershell=never"
+    ) ++ req.env.get("JAVA_HOME").toSeq.flatMap(home => Seq("--java-home", home)) ++ Seq(
       s"-Dsbt.global.settings=${globalSettings.getAbsolutePath}",
       // read by this plugin when the dependency uses it too; ignored otherwise
       s"-D${Nested.DirProp}=${req.nested.root.getAbsolutePath}",

@@ -1,0 +1,7 @@
+> run v1
+> sourceDepsStatus
+
+# the environment is part of the fingerprint: changing it rebuilds
+> set ThisBuild / sourceDepsEnv := Map("GREETING" -> "v2")
+> sourceDepsStatus
+> run v2

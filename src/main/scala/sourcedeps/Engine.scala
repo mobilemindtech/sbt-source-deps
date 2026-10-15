@@ -45,7 +45,7 @@ final class Engine(
       }
       val variant = variantOf(tool, scalaBinaryVersion)
       if fetch then fetchNested(home, variant, Set(dep.id))
-      val own = ownFingerprint(projectDir, tool, variant)
+      val own = ownFingerprint(projectDir, tool, variant, env)
       val expected = suffixOf(own, nestedLines(home, variant, Set(dep.id)))
 
       val published = Poms.published(repo, expected) match
@@ -85,7 +85,7 @@ final class Engine(
     val home = new File(root, dep.id)
     projectDir(dep, home).filter(_.isDirectory).map { dir =>
       detect(dep, dir).exists { tool =>
-        Poms.published(repo, versionSuffix(dep, dir, tool, scalaBinaryVersion, Set(dep.id))).nonEmpty
+        Poms.published(repo, versionSuffix(dep, dir, tool, scalaBinaryVersion, env, Set(dep.id))).nonEmpty
       }
     }
 
@@ -102,8 +102,10 @@ final class Engine(
   private def variantOf(tool: BuildTool, scalaBinary: String): String =
     if tool == BuildTool.Sbt then s"scala-$scalaBinary" else "default"
 
-  private def ownFingerprint(dir: File, tool: BuildTool, variant: String): String =
-    Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant"))
+  /** The environment is part of it: a different `JAVA_HOME` (or any variable the build reads) rebuilds. */
+  private def ownFingerprint(dir: File, tool: BuildTool, variant: String, env: Map[String, String]): String =
+    val envLines = env.toSeq.sorted.map((k, v) => s"env=$k=$v")
+    Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant") ++ envLines)
 
   /**
    * The suffix appended to every published version: the dependency's own sources plus, recursively,
@@ -116,9 +118,11 @@ final class Engine(
   private def nestedLines(home: File, variant: String, visited: Set[String]): Seq[String] =
     Nested.read(home, variant).map(r => s"nested=${r.dep.id}@${currentSuffix(r, visited).getOrElse("missing")}")
 
-  private def versionSuffix(dep: SourceDep, dir: File, tool: BuildTool, scalaBinary: String, visited: Set[String]): String =
+  private def versionSuffix(
+      dep: SourceDep, dir: File, tool: BuildTool, scalaBinary: String, env: Map[String, String], visited: Set[String]
+  ): String =
     val variant = variantOf(tool, scalaBinary)
-    suffixOf(ownFingerprint(dir, tool, variant), nestedLines(new File(root, dep.id), variant, visited))
+    suffixOf(ownFingerprint(dir, tool, variant, env), nestedLines(new File(root, dep.id), variant, visited))
 
   /** The suffix a nested dependency would be published with now; None when it is not checked out. */
   private def currentSuffix(r: Nested.Record, visited: Set[String]): Option[String] =
@@ -127,7 +131,7 @@ final class Engine(
       for
         dir <- projectDir(r.dep, new File(root, r.dep.id)).filter(_.isDirectory)
         tool <- detect(r.dep, dir)
-      yield versionSuffix(r.dep, dir, tool, r.scalaBinaryVersion, visited + r.dep.id)
+      yield versionSuffix(r.dep, dir, tool, r.scalaBinaryVersion, r.env, visited + r.dep.id)
 
   /** Every module currently published by the nested dependencies of `home`, recursively. */
   private def nestedPublished(home: File, variant: String, visited: Set[String]): Seq[Coordinates] =

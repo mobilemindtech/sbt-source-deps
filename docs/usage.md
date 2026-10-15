@@ -343,6 +343,13 @@ ThisBuild / sourceDepsEnv := Map(
 
 The environment applies to the build tools only. Git commands run with sbt's environment.
 
+- `JAVA_HOME` also puts `$JAVA_HOME/bin` first on the `PATH` of the builds, and sbt dependencies get
+  `--java-home`: launch scripts (sbt's among them) run the `java` found on the `PATH` and would
+  otherwise ignore it. Mill and scala-cli may still pick their own JVM when the project pins one
+  (`mill-jvm-version`, `//> using jvm`).
+- The environment is part of the [fingerprint](how-it-works.md#fingerprint): changing it rebuilds the
+  dependencies.
+
 ## Where the files go
 
 Everything lives in `.source-deps/` at the root of your build:

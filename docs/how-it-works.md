@@ -64,6 +64,17 @@ The files are listed as follows:
 Hashing contents (rather than timestamps) means that touching a file, switching branches back and
 forth, or restoring a cache never causes a useless rebuild, and a real change is never missed.
 
+### Hash cache
+
+Reading every file on each `update` gets slow for large dependencies. The SHA-256 of each file is kept
+in `<dependency>/file-hashes.tsv` with the file's size and modification time, and reused while both are
+unchanged. Only new or modified files are read.
+
+As in git's index, an entry is trusted only if the file was modified more than 2 seconds before it was
+hashed. A file written in the same instant as the hash could otherwise change without its size or
+(coarse) modification time changing. Such files are hashed again on the next check. A missing or
+corrupt cache only costs a full read.
+
 ## Versions
 
 The suffix is `+src.` followed by the first 12 hex digits of the fingerprint.

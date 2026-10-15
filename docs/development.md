@@ -227,6 +227,14 @@ Tried with app → middle (uses the plugin) → greeter. Findings, in order:
   arguments at `-source 17 -target 17`, on JDK 25 and 27, and with `ScalaCompile` options. Not
   investigated further; `gradle-kotlin` uses a Scala 2.13 library.
 
+### Hash cache (2026-10-15)
+
+- The fingerprint now hashes the SHA-256 of each file instead of feeding the bytes directly, so a
+  cached per-file hash can stand in for the file. This changes every suffix once (format version 4).
+- Racy entries (mtime within 2 s of the hashing time) are not trusted, the same trick as git's index.
+- The cache is written to a temporary file and moved atomically: nested suffixes are computed without
+  holding the dependency's lock.
+
 ### Scaladoc and `lmcoursier`
 
 `publishLocal` of the plugin failed in `Compile / doc` ("undefined: new dataclass.data"). The
@@ -253,6 +261,7 @@ plugin's docs are disabled for now.
   - tests for Maven `${revision}` + SNAPSHOT, Gradle multi-project, Mill `Cross` modules;
   - timestamped SNAPSHOTs; per-Scala-version selection of cross-published modules;
   - `.partialClone`; clear errors for a missing tool and for builds that publish nothing.
+- Roadmap item 4: per-file hash cache (`file-hashes.tsv`), format version 4.
 - Roadmap items 2–3: build duration logged; `sourceDepsShowOutput`; `.args`, `.env`, `.javaHome` per
   dependency (in the fingerprint and in nested records).
 - Roadmap item 1 (tests): Gradle Kotlin DSL + `scala` plugin; `sourceDepsEnv` in the fingerprint;
@@ -271,9 +280,7 @@ dependency with sbt 1.13.0).
 Next steps, roughly in priority order:
 
 1. **Tests for what is not verified yet** (list above).
-2. **Performance**: cache file hashes by (path, size, mtime) to avoid reading every file on each
-   `update` for large dependencies.
-3. **Publishing the plugin**: fix Scaladoc (or publish an empty Javadoc jar), POM metadata, CI
+2. **Publishing the plugin**: fix Scaladoc (or publish an empty Javadoc jar), POM metadata, CI
    (GitHub Actions running `scripted`), release to Maven Central.
-4. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
+3. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
    navigation into sources), and a global shared cache directory.

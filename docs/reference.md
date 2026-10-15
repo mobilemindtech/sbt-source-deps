@@ -105,6 +105,7 @@ files.
     ├── state-default                     last published suffix, per variant (state-scala-3 for sbt)
     ├── staging/                          publication with the original versions
     ├── nested-scala-3/                   source dependencies of the dependency's own build (sbt only)
+    ├── file-hashes.tsv                   per-file hashes reused while size and mtime are unchanged
     ├── sbt-global-settings/              generated global settings (sbt only)
     ├── source-deps.init.gradle           generated init script (Gradle only)
     └── .lock                             file lock serializing work on this dependency

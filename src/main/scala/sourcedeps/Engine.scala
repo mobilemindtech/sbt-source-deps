@@ -14,6 +14,7 @@ import sbt.util.Logger
  *   <id>/src/      git clone (git dependencies only)
  *   <id>/state-*   last published version per variant, used to clean up stale artifacts
  *   <id>/nested-*  source dependencies of the dependency's own build (see [[Nested]])
+ *   <id>/file-hashes.tsv  per-file hashes reused while size and mtime do not change (see [[HashCache]])
  */
 final case class Resolved(selected: Seq[Coordinates], published: Seq[Coordinates])
 
@@ -28,7 +29,7 @@ final class Engine(
   val repo: File = new File(root, "repo")
 
   /** Bump to invalidate every previously published artifact (e.g. when builder flags change). */
-  private val formatVersion = "3"
+  private val formatVersion = "4"
 
   /**
    * Builds `dep` when stale; returns the selected modules and every module to force (the build's own
@@ -113,7 +114,8 @@ final class Engine(
   private def ownFingerprint(dep: SourceDep, dir: File, tool: BuildTool, variant: String, baseEnv: Map[String, String]): String =
     val envLines = (baseEnv ++ dep.extraEnv).toSeq.sorted.map((k, v) => s"env=$k=$v")
     val argLines = dep.extraArgs.map(a => s"arg=$a")
-    Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant") ++ envLines ++ argLines)
+    val cache = new File(new File(root, dep.id), "file-hashes.tsv")
+    Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant") ++ envLines ++ argLines, Some(cache))
 
   /**
    * The suffix appended to every published version: the dependency's own sources plus, recursively,

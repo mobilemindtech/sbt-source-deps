@@ -3,6 +3,7 @@
 
 # tag, commit and branch HEAD, each in a subdirectory of the same repository
 > byTag/run v1
+> root/checkPartial
 > byCommit/run v2
 > byHead/run v3
 $ exists .source-deps/greeter-head/src/modules/greeter/build.sbt

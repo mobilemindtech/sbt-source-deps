@@ -47,11 +47,15 @@ $ copy-file changes/Greeter.scala greeter/...
 | Test | What it covers in addition |
 | --- | --- |
 | `local-sbt` | Cross-build selection (library defaults to 2.13, consumer on 3); forced version over a declared `greeter % "9.9.9"` that exists nowhere; `sourceDepsClean` removes the artifacts and the next compile rebuilds |
-| `git-refs` | Tag, commit and `HEAD` refs of one repository, each with `.subdir(...)`, one with `.named(...)`; the clone is not moved while it has local edits |
+| `git-refs` | Tag, commit and `HEAD` refs of one repository, each with `.subdir(...)`, two with `.named(...)`; the tag uses `.partialClone`; the clone is not moved while it has local edits |
 | `nested-sbt` | The dependency (`middle`) uses the plugin for its own dependency (`greeter`): built into the consumer's directory, `greeter` forced over a declared `9.9.9`, a change in `greeter` rebuilds `middle` |
 | `nested-cycle` | `a` → `b` → `a` fails with a cycle error |
 | `sbt1-cross` | Dependency built with sbt 1.13; two consumer projects (Scala 2.13 and 3) get one variant each, both rebuilt after a change |
 | `git-sbt` | Clone of a git repository created by the test; a new commit on the branch is ignored until `sourceDepsUpdate` |
+| `maven-revision` | `${revision}` with a `-SNAPSHOT` version, without `flatten-maven-plugin`: timestamped files and placeholders in the deployed POMs |
+| `gradle-multi` | Multi-project build, `core` depends on `project(':api')`; a change in `api` comes through `core` |
+| `mill-cross` | `Cross[...]` modules for 2.13 and 3, consumed by a 2.13 and a 3 project: each gets only its own artifacts |
+| `build-errors` | Message when the tool command does not exist, and when an sbt build publishes nothing (`publish / skip`) |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
 | `local-gradle` | Plain `java-library` without publishing configuration |
 | `local-mill` | Mill 1.3.0 through the project's `./mill` bootstrap script |
@@ -189,6 +193,25 @@ Tried with app → middle (uses the plugin) → greeter. Findings, in order:
 - Records keep the nested build's id verbatim (as `alias`): a relative `file("../greeter")` is resolved
   against the nested build's directory, so the outer build could not recompute it.
 
+### Phase 3, part 2 (2026-10-15)
+
+- **Maven SNAPSHOTs.** `mvn deploy` writes `greeter-1.0.0-20261015.182452-1.jar` into `1.0.0-SNAPSHOT/`
+  (unique snapshots), so the staged module was not found and the build "published nothing".
+  `Republish` now renames the latest timestamp to the plain `-SNAPSHOT` name first. Deployed POMs keep
+  `${revision}` literally (no flatten plugin); the existing placeholder rewriting handled them.
+- **Cross-published modules.** Mill `Cross` publishes `greeter_2.13` and `greeter_3` in one build, and
+  `.modules("greeter")` selected both: sbt failed with "Conflicting cross-version suffixes". The
+  selection now keeps, per module, only the artifact of the consumer's Scala binary version (or every
+  artifact when none matches). All of them are still forced.
+- **Partial rather than shallow clones.** `--depth 1` cannot check out an arbitrary commit, and
+  `sourceDepsUpdate`/ref changes would need `--unshallow` or deepening. `--filter=blob:none` keeps the
+  whole history (commits and trees) and downloads file contents on demand, so every existing code
+  path works. Opt-in (`.partialClone`) because checking out another ref then needs the network. A
+  `file://` remote needs `uploadpack.allowFilter=true`, otherwise git ignores the filter.
+- **Missing tools.** `Proc.Result.notStarted` separates "could not launch" from "exited with 127", and
+  the builders turn it into a message with the `sourceDepsCommands` line to add.
+- In sbt 2, `Result` is an enum: match on `Result.Inc(i)` / `Result.Value(v)` in build files.
+
 ### Scaladoc and `lmcoursier`
 
 `publishLocal` of the plugin failed in `Compile / doc` ("undefined: new dataclass.data"). The
@@ -211,31 +234,31 @@ plugin's docs are disabled for now.
   - git without prompts; refuse to move a clone with local edits; no stack traces for user errors;
   - dependencies that use the plugin themselves (shared directory, cascading rebuilds, cycles); sbt
     builds go through staging too.
+- Phase 3 (part 2):
+  - tests for Maven `${revision}` + SNAPSHOT, Gradle multi-project, Mill `Cross` modules;
+  - timestamped SNAPSHOTs; per-Scala-version selection of cross-published modules;
+  - `.partialClone`; clear errors for a missing tool and for builds that publish nothing.
 
-**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the ten scripted tests above (the sbt 1.x
+**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the fourteen scripted tests above (the sbt 1.x
 dependency with sbt 1.13.0).
 
 **Not verified yet**
-- Maven CI-friendly versions (`${revision}`), Gradle multi-project builds, Mill multi-module builds and
-  `CrossScalaModule`;
+- Gradle builds publishing several Scala versions (Scala plugin with variants), Gradle Kotlin DSL;
+- `sourceDepsEnv` with a different `JAVA_HOME`;
 - macOS and Windows (paths, wrapper scripts, `sh` fallback).
 
 ## Roadmap
 
 Next steps, roughly in priority order:
 
-1. **Tests for what is not verified yet** (list above): Maven `${revision}`, Gradle multi-project,
-   Mill multi-module and `CrossScalaModule`.
-2. **Git robustness**: offer shallow clones for large repositories.
-3. **Clear errors** when a tool is missing (suggest `sourceDepsCommands`/a wrapper) and when a build
-   publishes nothing.
-4. **Progress feedback**: log the elapsed time of each build; optionally stream the tool output at
+1. **Tests for what is not verified yet** (list above).
+2. **Progress feedback**: log the elapsed time of each build; optionally stream the tool output at
    info level (setting).
-5. **Per-dependency options**: extra arguments and environment per `SourceDep` (e.g. Maven profiles,
+3. **Per-dependency options**: extra arguments and environment per `SourceDep` (e.g. Maven profiles,
    Gradle properties, a specific JDK).
-6. **Performance**: cache file hashes by (path, size, mtime) to avoid reading every file on each
+4. **Performance**: cache file hashes by (path, size, mtime) to avoid reading every file on each
    `update` for large dependencies.
-7. **Publishing the plugin**: fix Scaladoc (or publish an empty Javadoc jar), POM metadata, CI
+5. **Publishing the plugin**: fix Scaladoc (or publish an empty Javadoc jar), POM metadata, CI
    (GitHub Actions running `scripted`), release to Maven Central.
-8. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
+6. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
    navigation into sources), and a global shared cache directory.

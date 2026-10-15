@@ -39,6 +39,7 @@ private[sourcedeps] object Nested:
           p.setProperty("git.ref", ref)
         case SourceLocation.Local(d) =>
           p.setProperty("local.dir", d.getCanonicalPath)
+      if dep.partial then p.setProperty("git.partial", "true")
       dep.subdirectory.foreach(p.setProperty("subdir", _))
       dep.tool.foreach(t => p.setProperty("tool", t.toString))
       if dep.moduleFilter.nonEmpty then p.setProperty("modules", dep.moduleFilter.mkString(","))
@@ -72,7 +73,8 @@ private[sourcedeps] object Nested:
             moduleFilter = get("modules").toSeq.flatMap(_.split(',')),
             tool = get("tool").flatMap(t => BuildTool.values.find(_.toString == t)),
             // the id computed by the nested build names its directory: keep it verbatim
-            alias = Some(id)
+            alias = Some(id),
+            partial = get("git.partial").contains("true")
           ),
           scala
         )

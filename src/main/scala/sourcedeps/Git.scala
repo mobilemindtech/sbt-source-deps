@@ -27,11 +27,12 @@ private[sourcedeps] object Git:
     if r.ok then r.out.headOption.map(_.trim) else None
 
   /** Makes sure `dir` is a clone of `url` checked out at `ref`. Only fetches when `fetch` is true or the ref is unknown. */
-  def sync(url: String, ref: String, dir: File, fetch: Boolean, log: Logger): Unit =
+  def sync(url: String, ref: String, dir: File, fetch: Boolean, log: Logger, partial: Boolean = false): Unit =
     if !new File(dir, ".git").exists then
-      log.info(s"[source-deps] cloning $url into $dir")
+      log.info(s"[source-deps] cloning $url into $dir" + (if partial then " (partial clone)" else ""))
       dir.getParentFile.mkdirs()
-      checked(dir.getParentFile, "clone", "--quiet", normalize(url), dir.getAbsolutePath)
+      val filter = if partial then Seq("--filter=blob:none") else Nil
+      checked(dir.getParentFile, Seq("clone", "--quiet") ++ filter ++ Seq(normalize(url), dir.getAbsolutePath)*)
     else if fetch then
       log.info(s"[source-deps] fetching $url")
       checked(dir, "fetch", "--quiet", "--tags", "--force", "origin")

@@ -111,6 +111,8 @@ meta-build (`project/`), where self-references create cycles.
 
 For every module found in `staging/`:
 
+0. Timestamped SNAPSHOT files (`greeter-1.0.0-20261015.182452-1.jar`, written by `mvn deploy`) are
+   renamed to `greeter-1.0.0-SNAPSHOT.jar`, keeping the latest build.
 1. The coordinates are taken from the repository layout (`group/artifact/version/`), because raw POMs
    may contain placeholders such as `${revision}`.
 2. Files are copied with the suffixed version in their names. Checksums, signatures and Gradle

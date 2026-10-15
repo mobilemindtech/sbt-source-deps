@@ -66,7 +66,8 @@ final class Engine(
           // the suffix is final only now, so later up-to-date checks compute the same value
           val suffix = suffixOf(own, nestedLines(home, variant, Set(dep.id)))
           val result = Republish(staging, repo, suffix)
-          if result.isEmpty then throw ProcessFailed(s"the build of $dep did not publish any module")
+          if result.isEmpty then
+            throw ProcessFailed(s"the build of $dep did not publish any module into $staging.\n${Engine.nothingPublishedHint(tool)}")
           readState(home, variant).filter(_ != suffix).foreach(removeVersion)
           writeState(home, variant, suffix)
           Poms.published(repo, suffix)
@@ -143,7 +144,8 @@ final class Engine(
       val nestedHome = new File(root, r.dep.id)
       Engine.withLock(nestedHome) {
         r.dep.location match
-          case SourceLocation.Git(url, ref) => Git.sync(url, ref, new File(nestedHome, "src"), fetch = true, log)
+          case SourceLocation.Git(url, ref) =>
+            Git.sync(url, ref, new File(nestedHome, "src"), fetch = true, log, r.dep.partial)
           case SourceLocation.Local(_)      => ()
       }
       projectDir(r.dep, nestedHome).filter(_.isDirectory).flatMap(detect(r.dep, _)).foreach { t =>
@@ -159,7 +161,7 @@ final class Engine(
 
   private def checkout(dep: SourceDep, home: File, fetch: Boolean): File =
     dep.location match
-      case SourceLocation.Git(url, ref) => Git.sync(url, ref, new File(home, "src"), fetch, log)
+      case SourceLocation.Git(url, ref) => Git.sync(url, ref, new File(home, "src"), fetch, log, dep.partial)
       case SourceLocation.Local(dir) =>
         if !dir.isDirectory then throw ProcessFailed(s"source dependency directory does not exist: $dir")
     val dir = projectDir(dep, home).get
@@ -167,7 +169,7 @@ final class Engine(
     dir
 
   private def select(dep: SourceDep, all: Seq[Coordinates]): Seq[Coordinates] =
-    val candidates = all.filterNot(_.packaging == "pom")
+    val candidates = forThisScala(all.filterNot(_.packaging == "pom"))
     if dep.moduleFilter.isEmpty then candidates
     else
       val selected = candidates.filter(c => dep.moduleFilter.contains(c.artifactId) || dep.moduleFilter.contains(baseName(c.artifactId)))
@@ -175,6 +177,20 @@ final class Engine(
       if missing.nonEmpty then
         throw ProcessFailed(s"modules ${missing.mkString(", ")} not published by $dep; available: ${candidates.map(_.artifactId).mkString(", ")}")
       selected
+
+  /**
+   * Builds that cross-publish every Scala version at once (Mill `Cross`, Gradle/Maven variants) give
+   * `core_2.13` and `core_3`: keep the one matching the consumer. A module without an artifact for this
+   * Scala binary version is kept whole (e.g. a 2.13 library used from Scala 3).
+   */
+  private def forThisScala(modules: Seq[Coordinates]): Seq[Coordinates] =
+    modules.groupBy(c => (c.groupId, baseName(c.artifactId))).values.flatMap { group =>
+      val matching = group.filter(c => scalaSuffix(c.artifactId).contains(scalaBinaryVersion))
+      if matching.isEmpty then group else matching ++ group.filter(c => scalaSuffix(c.artifactId).isEmpty)
+    }.toSeq.sortBy(_.toString)
+
+  private def scalaSuffix(artifactId: String): Option[String] =
+    "_([0-9]+(?:\\.[0-9]+)?)$".r.findFirstMatchIn(artifactId).map(_.group(1))
 
   /** `core_3` -> `core`, `core_2.13` -> `core`, `plugin_2.12_1.0` -> `plugin`. */
   private def baseName(artifactId: String): String = artifactId.replaceAll("(_[0-9][0-9.]*(-[A-Za-z0-9]+)?)+$", "")
@@ -212,6 +228,18 @@ final class Engine(
       current = current.getParentFile
 
 object Engine:
+  /** Common reasons why a build tool publishes nothing, by tool. */
+  def nothingPublishedHint(tool: BuildTool): String = tool match
+    case BuildTool.Sbt =>
+      "Check that the projects you need do not set `publish / skip := true` and are aggregated by the root project."
+    case BuildTool.Maven =>
+      "Check that `maven.deploy.skip` is not set and that no plugin replaces maven-deploy-plugin (e.g. nexus-staging)."
+    case BuildTool.Gradle =>
+      "Only projects applying the `java` plugin (java-library, scala, kotlin-jvm, ...) are published."
+    case BuildTool.Mill =>
+      "Only modules extending `PublishModule` are published."
+    case BuildTool.ScalaCli =>
+      "Check the `//> using publish.*` directives of the project."
   private val jvmLocks = ConcurrentHashMap[String, ReentrantLock]()
 
   /** Serializes work on a dependency across threads of this JVM and across sbt processes. */

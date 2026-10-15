@@ -1,0 +1,29 @@
+//| mill-version: 1.3.0
+package build
+
+import mill.*, scalalib.*, publish.*
+
+val scalaVersions = Seq("2.13.16", "3.8.4")
+
+trait Published extends CrossScalaModule with PublishModule {
+  def publishVersion = "1.0.0"
+  def pomSettings = PomSettings(
+    description = "greeter",
+    organization = "example",
+    url = "https://example.com/greeter",
+    licenses = Seq(License.MIT),
+    versionControl = VersionControl(),
+    developers = Nil
+  )
+}
+
+object api extends Cross[ApiModule](scalaVersions)
+trait ApiModule extends Published {
+  def artifactName = "greeter-api"
+}
+
+object core extends Cross[CoreModule](scalaVersions)
+trait CoreModule extends Published {
+  def artifactName = "greeter"
+  def moduleDeps = Seq(api())
+}

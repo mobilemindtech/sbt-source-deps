@@ -107,7 +107,10 @@ mvn --batch-mode --no-transfer-progress -DskipTests -Dmaven.javadoc.skip=true -D
   published so that the modules resolve, but are not added to your dependencies.
 - Modules that skip deployment (`maven.deploy.skip`) are not published.
 - CI-friendly versions (`${revision}`) are handled: coordinates are read from the repository layout,
-  and parent references using a placeholder are rewritten. This case is not covered by a test yet.
+  and parent references using a placeholder are rewritten. `flatten-maven-plugin` is not needed.
+- SNAPSHOT versions work: `deploy` names the files with a timestamp
+  (`greeter-1.0.0-20261015.182452-1.jar`), and the plugin renames the latest build before
+  republishing. The result is `1.0.0-SNAPSHOT+src.<hash>`, which coursier treats as a release.
 
 **Requirements.** Maven 3.x or `./mvnw`. Repositories and credentials come from your
 `~/.m2/settings.xml`.
@@ -237,9 +240,9 @@ Each tool is covered by a scripted test (`src/sbt-test/source-deps/`):
 | --- | --- | --- |
 | sbt | 2.0.10 | `local-sbt`, `git-sbt`, `git-refs`, `nested-sbt`, `nested-cycle` |
 | sbt | 1.13.0 | `sbt1-cross` |
-| Maven | 3.9.9 | `local-maven` (reactor with parent) |
-| Gradle | 9.8.0 | `local-gradle` |
-| Mill | 1.3.0 (via `./mill`) | `local-mill` |
+| Maven | 3.9.9 | `local-maven` (reactor with parent), `maven-revision` (`${revision}`, SNAPSHOT) |
+| Gradle | 9.8.0 | `local-gradle`, `gradle-multi` (multi-project) |
+| Mill | 1.3.0 (via `./mill`) | `local-mill`, `mill-cross` (`Cross` modules, two consumer Scala versions) |
 | scala-cli | 1.16.0 (`scala` runner) | `local-scalacli` |
 
 All tests ran on JDK 27 (Zulu), Linux.

@@ -15,7 +15,8 @@ final case class SourceDep(
     subdirectory: Option[String] = None,
     moduleFilter: Seq[String] = Nil,
     tool: Option[BuildTool] = None,
-    alias: Option[String] = None
+    alias: Option[String] = None,
+    partial: Boolean = false
 ):
   /** Build the project located in this subdirectory of the source tree. */
   def subdir(path: String): SourceDep = copy(subdirectory = Some(path))
@@ -25,6 +26,14 @@ final case class SourceDep(
 
   /** Skip detection and force a build tool. */
   def buildTool(t: BuildTool): SourceDep = copy(tool = Some(t))
+
+  /**
+   * Git only: clone without file contents (`--filter=blob:none`); git downloads them on checkout. Much
+   * faster for large repositories with a long history, but checking out another ref needs the network.
+   * The server must support partial clone (GitHub, GitLab and Bitbucket do); otherwise git makes a full
+   * clone.
+   */
+  def partialClone: SourceDep = copy(partial = true)
 
   /** Name of the directory used for this dependency under `sourceDepsDirectory`. */
   def named(name: String): SourceDep = copy(alias = Some(name))

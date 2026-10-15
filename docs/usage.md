@@ -76,6 +76,18 @@ rebuild like a local directory would. Commit them elsewhere: the clone is manage
 clone to another commit (after a `sourceDepsUpdate` or a ref change), so a build never mixes your
 edits with a different commit.
 
+### Large repositories
+
+For a repository with a long history, a partial clone downloads only the commits and trees, and the
+file contents of the checked-out commit:
+
+```scala
+sourceDependencies += SourceDep.git("https://github.com/example/huge.git", ref = "v5.0.0").partialClone
+```
+
+Any ref can still be checked out later, but that needs the network to download the missing file
+contents. Servers without partial clone support (old self-hosted ones) silently get a full clone.
+
 ## Private repositories
 
 The plugin runs the `git` command, so it uses your usual git authentication: SSH agent, credential
@@ -281,8 +293,11 @@ The artifacts the dependency publishes must be usable from your Scala version:
   `crossScalaVersions := Seq("2.13.16", "3.8.4")`, the library is built and published for `3.8.4`
   even if its default `scalaVersion` is 2.13. When no entry matches, the library's own `scalaVersion`
   is used.
-- **Mill, scala-cli, Gradle and Maven** dependencies are built as their build defines. If a Mill
-  `CrossScalaModule` publishes several Scala versions, use `.modules(...)` to pick the right artifact.
+- **Mill, scala-cli, Gradle and Maven** dependencies are built as their build defines. When a build
+  publishes a module for several Scala versions (a Mill `Cross[...]` module gives `core_2.13` and
+  `core_3`), each project of your build gets only the artifact of its own Scala binary version. A
+  module without an artifact for that version is added as published (for example, a 2.13 library used
+  from Scala 3).
 
 Scala 3 projects can use Scala 2.13 artifacts (`lib_2.13`) as long as the library does not expose
 Scala 2 macros. The plugin adds the exact artifact id, so no `CrossVersion.for3Use2_13` is needed.

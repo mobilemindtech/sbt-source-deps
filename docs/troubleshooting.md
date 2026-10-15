@@ -25,10 +25,10 @@ logs it before each build:
 None of the [detection files](build-tools.md#detection) is in the project directory. Check the
 path, and `.subdir(...)` for projects inside a repository, or set `.buildTool(...)`.
 
-## `failed to run <tool>: Cannot run program ...` (exit 127)
+## `could not run <tool> to build ...`
 
-The tool is not on the `PATH` seen by sbt. Install it, add a wrapper to the dependency, or point the
-plugin to it:
+The tool is not on the `PATH` seen by sbt. The message suggests the fix. Install the tool, add a
+wrapper to the dependency, or point the plugin at it:
 
 ```scala
 ThisBuild / sourceDepsCommands += BuildTool.Gradle -> Seq("/opt/gradle/bin/gradle")
@@ -38,7 +38,8 @@ IDEs started from a desktop launcher often have a shorter `PATH` than your termi
 
 ## `the build of ... did not publish any module`
 
-The build succeeded but nothing reached the repository. Check that:
+The build succeeded but nothing reached the staging repository. The message ends with a hint for the
+tool. Check that:
 
 - **sbt**: the projects are not `publish / skip := true`;
 - **Maven**: `maven.deploy.skip` is not set, and no plugin replaces `deploy` (for example

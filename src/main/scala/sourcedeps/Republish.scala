@@ -18,6 +18,7 @@ private[sourcedeps] object Republish:
   private val skipped = Seq(".sha1", ".md5", ".sha256", ".sha512", ".asc", ".module")
 
   def apply(staging: File, repo: File, suffix: String): Seq[Coordinates] =
+    normalizeSnapshots(staging)
     val staged = Poms.published(staging, "").filterNot(_.version.endsWith(suffix))
     val reactor = staged.map(c => (c.groupId, c.artifactId) -> c.version).toMap
     staged.map { c =>
@@ -37,6 +38,29 @@ private[sourcedeps] object Republish:
         }
       target
     }
+
+  /**
+   * `mvn deploy` (and Gradle) publish SNAPSHOTs with unique names: `greeter-1.0.0-20261015.182452-1.jar`
+   * in `1.0.0-SNAPSHOT/`. The latest build of each SNAPSHOT is renamed to `greeter-1.0.0-SNAPSHOT.jar`,
+   * the layout the rest of the republishing expects. Staging is emptied before each build, so there
+   * is normally a single timestamp.
+   */
+  private def normalizeSnapshots(staging: File): Unit =
+    sbt.io.PathFinder(staging).**(sbt.io.DirectoryFilter).get()
+      .filter(_.getName.endsWith("-SNAPSHOT"))
+      .foreach { versionDir =>
+        val version = versionDir.getName
+        val artifact = versionDir.getParentFile.getName
+        val unique = s"^${java.util.regex.Pattern.quote(s"$artifact-${version.stripSuffix("-SNAPSHOT")}")}-(\\d{8}\\.\\d{6})-(\\d+)(.*)$$".r
+        val files = Option(versionDir.listFiles()).getOrElse(Array.empty[File]).toSeq.filter(_.isFile)
+        val stamped = files.flatMap(f => unique.findFirstMatchIn(f.getName).map(m => (f, (m.group(1), m.group(2).toInt), m.group(3))))
+        if stamped.nonEmpty then
+          val latest = stamped.map(_._2).max
+          stamped.filter(_._2 == latest).foreach { (f, _, rest) =>
+            val target = new File(versionDir, s"$artifact-$version$rest")
+            if !target.exists then Files.move(f.toPath, target.toPath)
+          }
+      }
 
   private def rewritePom(in: File, out: File, c: Coordinates, reactor: Map[(String, String), String], suffix: String): Unit =
     val factory = DocumentBuilderFactory.newInstance()

@@ -18,8 +18,9 @@ Every method returns a new `SourceDep`, so calls can be chained.
 | Method | Description |
 | --- | --- |
 | `.subdir(path: String)` | Build the project in this subdirectory, relative to the repository or directory root. |
-| `.modules(names: String*)` | Add only these published modules. Names are artifact ids, with or without the Scala suffix (`core` matches `core_3`). Other modules of the build are still forced (see [`sourceDepsForcedVersions`](#sourcedepsforcedversions)). |
+| `.modules(names: String*)` | Add only these published modules. Names are artifact ids, with or without the Scala suffix (`core` matches `core_3`). When the build publishes a module for several Scala versions (`core_2.13`, `core_3`), only the one matching the project's Scala binary version is added, with or without `.modules`. Other modules of the build are still forced (see [`sourceDepsForcedVersions`](#sourcedepsforcedversions)). |
 | `.buildTool(tool: BuildTool)` | Skip detection. `BuildTool.Sbt`, `Mill`, `Gradle`, `Maven` or `ScalaCli`. |
+| `.partialClone` | Git only: clone with `--filter=blob:none`. File contents are downloaded on checkout, which is much faster for large repositories with a long history. Checking out another ref then needs the network. Servers without partial clone support get a full clone. |
 | `.named(name: String)` | Name of the dependency's directory under `sourceDepsDirectory`, replacing the computed `<name>-<hash>`. |
 
 ### Identity

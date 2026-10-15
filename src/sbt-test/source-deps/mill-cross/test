@@ -1,0 +1,9 @@
+> app213/run v1
+> app3/run v1
+$ exists .source-deps/repo/example/greeter_2.13
+$ exists .source-deps/repo/example/greeter-api_3
+> sourceDepsStatus
+
+$ copy-file changes/Message.scala greeter/api/src/Message.scala
+> app213/run v2
+> app3/run v2

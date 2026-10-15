@@ -64,9 +64,17 @@ object Builders:
   private[sourcedeps] def onPath(command: String): Boolean =
     sys.env.getOrElse("PATH", "").split(File.pathSeparator).exists(d => new File(d, command).canExecute)
 
-  private[sourcedeps] def runLogged(req: BuildRequest, cmd: Seq[String]): Unit =
+  private[sourcedeps] def runLogged(req: BuildRequest, tool: BuildTool, cmd: Seq[String]): Unit =
     req.log.info(s"[source-deps] ${req.label}: ${cmd.mkString(" ")}")
     val r = Proc.run(cmd, req.projectDir, req.env.toSeq)(line => req.log.debug(s"[${req.label}] $line"))
+    r.notStarted.foreach { reason =>
+      val name = tool.toString
+      throw ProcessFailed(
+        s"could not run `${cmd.head}` to build ${req.label} ($reason).\n" +
+          s"Install it on the PATH, add the project's wrapper script, or point the plugin at it:\n" +
+          s"  sourceDepsCommands := sourceDepsCommands.value.updated(BuildTool.$name, Seq(\"/path/to/${defaultCommands(tool).head}\"))"
+      )
+    }
     if !r.ok then
       r.out.takeRight(80).foreach(l => req.log.error(s"[${req.label}] $l"))
       throw ProcessFailed(s"build of ${req.label} failed (exit ${r.exitCode}) running: ${cmd.mkString(" ")}")
@@ -85,7 +93,7 @@ object SbtBuilder extends Builder:
       s"-D${Nested.ChainProp}=${req.nested.chain.mkString(",")}",
       "publish"
     )
-    Builders.runLogged(req, cmd)
+    Builders.runLogged(req, BuildTool.Sbt, cmd)
 
   /**
    * The overrides are appended after load through a global settings file: `set every ...` cannot pick
@@ -163,7 +171,7 @@ object MavenBuilder extends Builder:
       s"-DaltDeploymentRepository=source-deps::default::${Builders.fileUri(req.staging)}",
       "deploy"
     )
-    Builders.runLogged(req, cmd)
+    Builders.runLogged(req, BuildTool.Maven, cmd)
 
 object GradleBuilder extends Builder:
   def publish(req: BuildRequest): Unit =
@@ -173,7 +181,7 @@ object GradleBuilder extends Builder:
       "--init-script", init.getAbsolutePath, "--console=plain",
       "publishAllPublicationsToSourceDepsStagingRepository"
     )
-    Builders.runLogged(req, cmd)
+    Builders.runLogged(req, BuildTool.Gradle, cmd)
 
   /** Adds maven-publish (and a publication, when the build declares none) to every JVM project. */
   private def initScript(stagingUri: String): String =
@@ -198,7 +206,7 @@ object MillBuilder extends Builder:
       "--no-server", "--ticker", "false",
       "__.publishM2Local", "--m2RepoPath", req.staging.getAbsolutePath
     )
-    Builders.runLogged(req, cmd)
+    Builders.runLogged(req, BuildTool.Mill, cmd)
 
 object ScalaCliBuilder extends Builder:
   def publish(req: BuildRequest): Unit =
@@ -209,4 +217,4 @@ object ScalaCliBuilder extends Builder:
     val cmd = launcher ++ Seq(
       "--power", "publish", ".", "--publish-repository", Builders.fileUri(req.staging)
     )
-    Builders.runLogged(req, cmd)
+    Builders.runLogged(req, BuildTool.ScalaCli, cmd)

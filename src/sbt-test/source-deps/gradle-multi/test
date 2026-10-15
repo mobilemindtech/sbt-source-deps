@@ -1,0 +1,8 @@
+> run v1
+$ exists .source-deps/repo/example/core
+$ exists .source-deps/repo/example/api
+> sourceDepsStatus
+
+# a change in api comes transitively through core
+$ copy-file changes/Message.java greeter/api/src/main/java/greeter/Message.java
+> run v2

@@ -16,7 +16,9 @@ def app(name: String, dep: Def.Initialize[SourceDep]) =
     sourceDependencies += dep.value
   )
 
-lazy val byTag = app("byTag", Def.setting(SourceDep.git(remote.value, ref = "v1").subdir("modules/greeter")))
+lazy val byTag = app("byTag", Def.setting(
+  SourceDep.git(remote.value, ref = "v1").subdir("modules/greeter").named("greeter-v1").partialClone
+))
 lazy val byCommit = app("byCommit", Def.setting(
   SourceDep.git(remote.value, ref = pinnedCommit((LocalRootProject / baseDirectory).value)).subdir("modules/greeter")
 ))
@@ -41,6 +43,7 @@ val initRemote = taskKey[Unit]("creates the upstream repository: v1 (tagged), v2
 val commitV4 = taskKey[Unit]("pushes v4 to the upstream branch")
 val editClone = taskKey[Unit]("edits a tracked file inside the clone of byHead")
 val discardEdit = taskKey[Unit]("discards the edit made by editClone")
+val checkPartial = taskKey[Unit]("checks that byTag's clone is a partial clone")
 
 // helper tasks live in the root project only: bare settings would apply to every subproject
 lazy val root = (project in file(".")).aggregate(byTag, byCommit, byHead).settings(
@@ -48,6 +51,8 @@ lazy val root = (project in file(".")).aggregate(byTag, byCommit, byHead).settin
     val dir = baseDirectory.value / "remote"
     IO.copyDirectory(baseDirectory.value / "upstream", dir)
     git(dir, "init", "--quiet", "-b", "main")
+    // let file:// clones honour --filter
+    git(dir, "config", "uploadpack.allowFilter", "true")
     commit(dir, "v1")
     git(dir, "tag", "v1")
     IO.write(baseDirectory.value / "v2-commit.txt", commit(dir, "v2"))
@@ -56,5 +61,9 @@ lazy val root = (project in file(".")).aggregate(byTag, byCommit, byHead).settin
   },
   commitV4 := { commit(baseDirectory.value / "remote", "v4"); () },
   editClone := writeGreeter(baseDirectory.value / ".source-deps/greeter-head/src", "local edit"),
+  checkPartial := {
+    val filter = git(baseDirectory.value / ".source-deps/greeter-v1/src", "config", "--get", "remote.origin.partialclonefilter")
+    if filter != "blob:none" then sys.error(s"expected a blob:none partial clone, got '$filter'")
+  },
   discardEdit := { git(baseDirectory.value / ".source-deps/greeter-head/src", "checkout", "--", "."); () }
 )

@@ -16,7 +16,9 @@ final case class BuildRequest(
     env: Map[String, String],
     log: Logger,
     label: String,
-    nested: NestedContext
+    nested: NestedContext,
+    args: Seq[String] = Nil,
+    showOutput: Boolean = false
 )
 
 /**
@@ -66,7 +68,9 @@ object Builders:
 
   private[sourcedeps] def runLogged(req: BuildRequest, tool: BuildTool, cmd: Seq[String]): Unit =
     req.log.info(s"[source-deps] ${req.label}: ${cmd.mkString(" ")}")
-    val r = Proc.run(cmd, req.projectDir, processEnv(req.env).toSeq)(line => req.log.debug(s"[${req.label}] $line"))
+    val r = Proc.run(cmd, req.projectDir, processEnv(req.env).toSeq) { line =>
+      if req.showOutput then req.log.info(s"[${req.label}] $line") else req.log.debug(s"[${req.label}] $line")
+    }
     r.notStarted.foreach { reason =>
       val name = tool.toString
       throw ProcessFailed(
@@ -102,9 +106,8 @@ object SbtBuilder extends Builder:
       // read by this plugin when the dependency uses it too; ignored otherwise
       s"-D${Nested.DirProp}=${req.nested.root.getAbsolutePath}",
       s"-D${Nested.RecordProp}=${req.nested.recordDir.getAbsolutePath}",
-      s"-D${Nested.ChainProp}=${req.nested.chain.mkString(",")}",
-      "publish"
-    )
+      s"-D${Nested.ChainProp}=${req.nested.chain.mkString(",")}"
+    ) ++ req.args :+ "publish"
     Builders.runLogged(req, BuildTool.Sbt, cmd)
 
   /**
@@ -180,9 +183,8 @@ object MavenBuilder extends Builder:
     val cmd = Builders.launcher(req, BuildTool.Maven, Some("mvnw")) ++ Seq(
       "--batch-mode", "--no-transfer-progress",
       "-DskipTests", "-Dmaven.javadoc.skip=true", "-Dgpg.skip=true",
-      s"-DaltDeploymentRepository=source-deps::default::${Builders.fileUri(req.staging)}",
-      "deploy"
-    )
+      s"-DaltDeploymentRepository=source-deps::default::${Builders.fileUri(req.staging)}"
+    ) ++ req.args :+ "deploy"
     Builders.runLogged(req, BuildTool.Maven, cmd)
 
 object GradleBuilder extends Builder:
@@ -190,9 +192,8 @@ object GradleBuilder extends Builder:
     val init = new File(req.workDir, "source-deps.init.gradle")
     sbt.io.IO.write(init, initScript(Builders.fileUri(req.staging)))
     val cmd = Builders.launcher(req, BuildTool.Gradle, Some("gradlew")) ++ Seq(
-      "--init-script", init.getAbsolutePath, "--console=plain",
-      "publishAllPublicationsToSourceDepsStagingRepository"
-    )
+      "--init-script", init.getAbsolutePath, "--console=plain"
+    ) ++ req.args :+ "publishAllPublicationsToSourceDepsStagingRepository"
     Builders.runLogged(req, BuildTool.Gradle, cmd)
 
   /** Adds maven-publish (and a publication, when the build declares none) to every JVM project. */
@@ -215,9 +216,8 @@ object GradleBuilder extends Builder:
 object MillBuilder extends Builder:
   def publish(req: BuildRequest): Unit =
     val cmd = Builders.launcher(req, BuildTool.Mill, Some("mill")) ++ Seq(
-      "--no-server", "--ticker", "false",
-      "__.publishM2Local", "--m2RepoPath", req.staging.getAbsolutePath
-    )
+      "--no-server", "--ticker", "false"
+    ) ++ req.args ++ Seq("__.publishM2Local", "--m2RepoPath", req.staging.getAbsolutePath)
     Builders.runLogged(req, BuildTool.Mill, cmd)
 
 object ScalaCliBuilder extends Builder:
@@ -228,5 +228,5 @@ object ScalaCliBuilder extends Builder:
       case other                                                                       => other
     val cmd = launcher ++ Seq(
       "--power", "publish", ".", "--publish-repository", Builders.fileUri(req.staging)
-    )
+    ) ++ req.args
     Builders.runLogged(req, BuildTool.ScalaCli, cmd)

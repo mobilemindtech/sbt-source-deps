@@ -17,6 +17,7 @@ object SourceDepsPlugin extends AutoPlugin:
     val sourceDepsDirectory = settingKey[File]("Where source dependencies are cloned and published.")
     val sourceDepsCommands = settingKey[Map[BuildTool, Seq[String]]]("Command used to launch each build tool when the project has no wrapper.")
     val sourceDepsEnv = settingKey[Map[String, String]]("Extra environment variables for the dependency builds (e.g. JAVA_HOME).")
+    val sourceDepsShowOutput = settingKey[Boolean]("Log the output of the dependency builds at info level instead of debug.")
     val sourceDepsResolve = taskKey[Seq[ModuleID]]("Builds stale source dependencies and returns their modules.")
     val sourceDepsForcedVersions = taskKey[Seq[ModuleID]]("Every module published by the source dependencies; their versions win over any other.")
     val sourceDepsUpdate = taskKey[Unit]("Fetches git source dependencies and rebuilds those that changed.")
@@ -31,7 +32,10 @@ object SourceDepsPlugin extends AutoPlugin:
 
   private def engine = Def.setting {
     (log: Logger) =>
-      Engine(sourceDepsDirectory.value, sourceDepsCommands.value, sourceDepsEnv.value, scalaBinaryVersion.value, log)
+      Engine(
+        sourceDepsDirectory.value, sourceDepsCommands.value, sourceDepsEnv.value, scalaBinaryVersion.value, log,
+        sourceDepsShowOutput.value
+      )
   }
 
   override def buildSettings: Seq[Setting[?]] = Seq(
@@ -39,7 +43,8 @@ object SourceDepsPlugin extends AutoPlugin:
     sourceDepsDirectory := sys.props.get(Nested.DirProp).map(file)
       .getOrElse((LocalRootProject / baseDirectory).value / ".source-deps"),
     sourceDepsCommands := Builders.defaultCommands,
-    sourceDepsEnv := Map.empty
+    sourceDepsEnv := Map.empty,
+    sourceDepsShowOutput := false
   )
 
   override def projectSettings: Seq[Setting[?]] = Seq(

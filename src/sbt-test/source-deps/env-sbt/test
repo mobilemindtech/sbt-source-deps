@@ -5,3 +5,12 @@
 > set ThisBuild / sourceDepsEnv := Map("GREETING" -> "v2")
 > sourceDepsStatus
 > run v2
+
+# per-dependency environment wins over sourceDepsEnv; the build output is shown at info level
+> set ThisBuild / sourceDepsShowOutput := true
+> set sourceDependencies := Seq(SourceDep.local(file("greeter")).env("GREETING" -> "v3"))
+> run v3
+
+# extra arguments for the build tool
+> set sourceDependencies := Seq(SourceDep.local(file("greeter")).args("-Dgreeting=v4"))
+> run v4

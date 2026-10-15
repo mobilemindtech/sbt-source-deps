@@ -46,7 +46,8 @@ The fingerprint decides whether a dependency must be rebuilt. It is a SHA-256 ov
 - a format version of the plugin (bumped when builders change in incompatible ways);
 - the build tool;
 - the variant (the consumer's Scala binary version for sbt dependencies, `default` otherwise);
-- `sourceDepsEnv`, sorted by name;
+- the environment (`sourceDepsEnv` plus the dependency's `.env(...)`), sorted by name, and the
+  dependency's `.args(...)`;
 - for each file of the project, sorted by path: its relative path and its **content**;
 - for each [nested source dependency](#dependencies-that-use-the-plugin) recorded by the previous
   build: its id and its current suffix, computed the same way (recursively).

@@ -350,6 +350,25 @@ The environment applies to the build tools only. Git commands run with sbt's env
 - The environment is part of the [fingerprint](how-it-works.md#fingerprint): changing it rebuilds the
   dependencies.
 
+### Options for one dependency
+
+Arguments, environment variables and the JDK can also be set per dependency. They add to the global
+settings, and changing them rebuilds that dependency:
+
+```scala
+sourceDependencies ++= Seq(
+  // a Maven profile and more memory
+  SourceDep.local(file("../billing")).args("-Pfast").env("MAVEN_OPTS" -> "-Xmx2g"),
+  // a Gradle property
+  SourceDep.git("https://github.com/example/json.git", ref = "v2.1.0").args("-PskipChecks=true"),
+  // an old library that only builds on JDK 11
+  SourceDep.local(file("../legacy")).javaHome(file("/usr/lib/jvm/java-11"))
+)
+```
+
+The arguments go before the publishing task of the tool (`deploy`, `publish`,
+`publishAllPublicationsTo...`, `__.publishM2Local`).
+
 ## Where the files go
 
 Everything lives in `.source-deps/` at the root of your build:

@@ -22,7 +22,8 @@ final class Engine(
     commands: Map[BuildTool, Seq[String]],
     env: Map[String, String],
     scalaBinaryVersion: String,
-    log: Logger
+    log: Logger,
+    showOutput: Boolean = false
 ):
   val repo: File = new File(root, "repo")
 
@@ -45,7 +46,7 @@ final class Engine(
       }
       val variant = variantOf(tool, scalaBinaryVersion)
       if fetch then fetchNested(home, variant, Set(dep.id))
-      val own = ownFingerprint(projectDir, tool, variant, env)
+      val own = ownFingerprint(dep, projectDir, tool, variant, env)
       val expected = suffixOf(own, nestedLines(home, variant, Set(dep.id)))
 
       val published = Poms.published(repo, expected) match
@@ -58,9 +59,10 @@ final class Engine(
           sbt.io.IO.delete(staging)
           staging.mkdirs()
           val req = BuildRequest(
-            projectDir, staging, home, scalaBinaryVersion, commands, env, log, dep.id,
-            NestedContext(root, nestedDir, chain :+ dep.id)
+            projectDir, staging, home, scalaBinaryVersion, commands, env ++ dep.extraEnv, log, dep.id,
+            NestedContext(root, nestedDir, chain :+ dep.id), dep.extraArgs, showOutput
           )
+          val started = System.nanoTime()
           Builders.forTool(tool).publish(req)
           // the build may have recorded nested source dependencies (first build, or a changed set):
           // the suffix is final only now, so later up-to-date checks compute the same value
@@ -70,6 +72,8 @@ final class Engine(
             throw ProcessFailed(s"the build of $dep did not publish any module into $staging.\n${Engine.nothingPublishedHint(tool)}")
           readState(home, variant).filter(_ != suffix).foreach(removeVersion)
           writeState(home, variant, suffix)
+          val seconds = (System.nanoTime() - started) / 1000000000L
+          log.info(s"[source-deps] built $dep in ${Engine.duration(seconds)}: ${result.size} module(s), version suffix $suffix")
           Poms.published(repo, suffix)
         case existing =>
           log.debug(s"[source-deps] $dep is up to date ($expected)")
@@ -102,10 +106,14 @@ final class Engine(
   private def variantOf(tool: BuildTool, scalaBinary: String): String =
     if tool == BuildTool.Sbt then s"scala-$scalaBinary" else "default"
 
-  /** The environment is part of it: a different `JAVA_HOME` (or any variable the build reads) rebuilds. */
-  private def ownFingerprint(dir: File, tool: BuildTool, variant: String, env: Map[String, String]): String =
-    val envLines = env.toSeq.sorted.map((k, v) => s"env=$k=$v")
-    Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant") ++ envLines)
+  /**
+   * The environment and extra arguments are part of it: a different `JAVA_HOME`, Maven profile, or any
+   * variable the build reads rebuilds the dependency.
+   */
+  private def ownFingerprint(dep: SourceDep, dir: File, tool: BuildTool, variant: String, baseEnv: Map[String, String]): String =
+    val envLines = (baseEnv ++ dep.extraEnv).toSeq.sorted.map((k, v) => s"env=$k=$v")
+    val argLines = dep.extraArgs.map(a => s"arg=$a")
+    Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant") ++ envLines ++ argLines)
 
   /**
    * The suffix appended to every published version: the dependency's own sources plus, recursively,
@@ -122,7 +130,7 @@ final class Engine(
       dep: SourceDep, dir: File, tool: BuildTool, scalaBinary: String, env: Map[String, String], visited: Set[String]
   ): String =
     val variant = variantOf(tool, scalaBinary)
-    suffixOf(ownFingerprint(dir, tool, variant, env), nestedLines(new File(root, dep.id), variant, visited))
+    suffixOf(ownFingerprint(dep, dir, tool, variant, env), nestedLines(new File(root, dep.id), variant, visited))
 
   /** The suffix a nested dependency would be published with now; None when it is not checked out. */
   private def currentSuffix(r: Nested.Record, visited: Set[String]): Option[String] =
@@ -232,6 +240,9 @@ final class Engine(
       current = current.getParentFile
 
 object Engine:
+  def duration(seconds: Long): String =
+    if seconds < 60 then s"$seconds s" else s"${seconds / 60} min ${seconds % 60} s"
+
   /** Common reasons why a build tool publishes nothing, by tool. */
   def nothingPublishedHint(tool: BuildTool): String = tool match
     case BuildTool.Sbt =>

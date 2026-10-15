@@ -46,6 +46,8 @@ private[sourcedeps] object Nested:
       if dep.moduleFilter.nonEmpty then p.setProperty("modules", dep.moduleFilter.mkString(","))
       p.setProperty("scalaBinaryVersion", scalaBinaryVersion)
       env.foreach((k, v) => p.setProperty(s"env.$k", v))
+      dep.extraEnv.foreach((k, v) => p.setProperty(s"dep.env.$k", v))
+      dep.extraArgs.zipWithIndex.foreach((a, i) => p.setProperty(f"dep.arg.$i%04d", a))
       val out = new File(dir, s"${dep.id}-$scalaBinaryVersion.properties")
       out.getParentFile.mkdirs()
       sbt.io.Using.fileOutputStream()(out)(p.store(_, "sbt-source-deps nested dependency"))
@@ -61,6 +63,8 @@ private[sourcedeps] object Nested:
         val p = Properties()
         sbt.io.Using.fileInputStream(f)(p.load)
         def get(k: String) = Option(p.getProperty(k)).filter(_.nonEmpty)
+        def withPrefix(prefix: String): Seq[(String, String)] =
+          p.stringPropertyNames.asScala.toSeq.collect { case k if k.startsWith(prefix) => k.stripPrefix(prefix) -> p.getProperty(k) }
         val location =
           get("git.url").map(SourceLocation.Git(_, get("git.ref").getOrElse("HEAD")))
             .orElse(get("local.dir").map(d => SourceLocation.Local(new File(d))))
@@ -76,9 +80,11 @@ private[sourcedeps] object Nested:
             tool = get("tool").flatMap(t => BuildTool.values.find(_.toString == t)),
             // the id computed by the nested build names its directory: keep it verbatim
             alias = Some(id),
-            partial = get("git.partial").contains("true")
+            partial = get("git.partial").contains("true"),
+            extraArgs = withPrefix("dep.arg.").sortBy(_._1).map(_._2),
+            extraEnv = withPrefix("dep.env.").toMap
           ),
           scala,
-          p.stringPropertyNames.asScala.toSeq.collect { case k if k.startsWith("env.") => k.stripPrefix("env.") -> p.getProperty(k) }.toMap
+          withPrefix("env.").toMap
         )
       }

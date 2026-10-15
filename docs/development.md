@@ -56,7 +56,7 @@ $ copy-file changes/Greeter.scala greeter/...
 | `gradle-multi` | Multi-project build, `core` depends on `project(':api')`; a change in `api` comes through `core` |
 | `mill-cross` | `Cross[...]` modules for 2.13 and 3, consumed by a 2.13 and a 3 project: each gets only its own artifacts |
 | `gradle-kotlin` | `build.gradle.kts` with the `scala` plugin (a Scala 2.13 library, used from Scala 3) |
-| `env-sbt` | `sourceDepsEnv` reaches the build (a source generator reads it); changing it rebuilds |
+| `env-sbt` | `sourceDepsEnv` reaches the build (a source generator reads it); changing it rebuilds; per-dependency `.env(...)` and `.args(...)`; `sourceDepsShowOutput` |
 | `build-errors` | Message when the tool command does not exist, and when an sbt build publishes nothing (`publish / skip`) |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
 | `local-gradle` | Plain `java-library` without publishing configuration |
@@ -253,6 +253,8 @@ plugin's docs are disabled for now.
   - tests for Maven `${revision}` + SNAPSHOT, Gradle multi-project, Mill `Cross` modules;
   - timestamped SNAPSHOTs; per-Scala-version selection of cross-published modules;
   - `.partialClone`; clear errors for a missing tool and for builds that publish nothing.
+- Roadmap items 2–3: build duration logged; `sourceDepsShowOutput`; `.args`, `.env`, `.javaHome` per
+  dependency (in the fingerprint and in nested records).
 - Roadmap item 1 (tests): Gradle Kotlin DSL + `scala` plugin; `sourceDepsEnv` in the fingerprint;
   `JAVA_HOME` honoured by sbt and on the `PATH`.
 
@@ -269,13 +271,9 @@ dependency with sbt 1.13.0).
 Next steps, roughly in priority order:
 
 1. **Tests for what is not verified yet** (list above).
-2. **Progress feedback**: log the elapsed time of each build; optionally stream the tool output at
-   info level (setting).
-3. **Per-dependency options**: extra arguments and environment per `SourceDep` (e.g. Maven profiles,
-   Gradle properties, a specific JDK).
-4. **Performance**: cache file hashes by (path, size, mtime) to avoid reading every file on each
+2. **Performance**: cache file hashes by (path, size, mtime) to avoid reading every file on each
    `update` for large dependencies.
-5. **Publishing the plugin**: fix Scaladoc (or publish an empty Javadoc jar), POM metadata, CI
+3. **Publishing the plugin**: fix Scaladoc (or publish an empty Javadoc jar), POM metadata, CI
    (GitHub Actions running `scripted`), release to Maven Central.
-6. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
+4. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
    navigation into sources), and a global shared cache directory.

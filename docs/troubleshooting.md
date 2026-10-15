@@ -10,6 +10,15 @@ sbt> sourceDepsUpdate
 sbt> last sourceDepsUpdate
 ```
 
+To see it as the build runs, for long builds or in CI:
+
+```scala
+ThisBuild / sourceDepsShowOutput := true
+```
+
+Each build ends with a line giving its duration:
+`[source-deps] built ../greeter in 42 s: 2 module(s), version suffix +src.6bd572a241a1`.
+
 When a build fails, its last 80 lines are already printed as errors, prefixed with the dependency's
 id (`[greeter-1a2b3c4d] ...`).
 

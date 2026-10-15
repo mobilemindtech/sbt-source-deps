@@ -16,7 +16,9 @@ final case class SourceDep(
     moduleFilter: Seq[String] = Nil,
     tool: Option[BuildTool] = None,
     alias: Option[String] = None,
-    partial: Boolean = false
+    partial: Boolean = false,
+    extraArgs: Seq[String] = Nil,
+    extraEnv: Map[String, String] = Map.empty
 ):
   /** Build the project located in this subdirectory of the source tree. */
   def subdir(path: String): SourceDep = copy(subdirectory = Some(path))
@@ -34,6 +36,18 @@ final case class SourceDep(
    * clone.
    */
   def partialClone: SourceDep = copy(partial = true)
+
+  /**
+   * Extra command-line arguments for this dependency's build tool, placed before the publishing task
+   * (e.g. `"-Pfast"` for Maven, `"-Pfoo=bar"` for Gradle, `"-J-Xmx4g"` for sbt). Repeated calls add up.
+   */
+  def args(arguments: String*): SourceDep = copy(extraArgs = extraArgs ++ arguments)
+
+  /** Environment variables for this dependency's build only, over `sourceDepsEnv`. Repeated calls add up. */
+  def env(variables: (String, String)*): SourceDep = copy(extraEnv = extraEnv ++ variables)
+
+  /** Builds this dependency with another JDK: shorthand for `.env("JAVA_HOME" -> home)`. */
+  def javaHome(home: File): SourceDep = env("JAVA_HOME" -> home.getAbsolutePath)
 
   /** Name of the directory used for this dependency under `sourceDepsDirectory`. */
   def named(name: String): SourceDep = copy(alias = Some(name))

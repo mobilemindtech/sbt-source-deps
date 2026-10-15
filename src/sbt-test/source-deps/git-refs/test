@@ -1,0 +1,21 @@
+> root/initRemote
+> reload
+
+# tag, commit and branch HEAD, each in a subdirectory of the same repository
+> byTag/run v1
+> byCommit/run v2
+> byHead/run v3
+$ exists .source-deps/greeter-head/src/modules/greeter/build.sbt
+> sourceDepsStatus
+
+# the clone is never moved over local edits
+> root/commitV4
+> root/editClone
+-> byHead/sourceDepsUpdate
+> root/discardEdit
+> byHead/sourceDepsUpdate
+> byHead/run v4
+
+# pinned refs do not move
+> byTag/run v1
+> byCommit/run v2

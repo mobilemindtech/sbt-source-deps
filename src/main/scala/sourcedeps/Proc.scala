@@ -5,7 +5,8 @@ import java.nio.charset.StandardCharsets.UTF_8
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 
-final class ProcessFailed(msg: String) extends RuntimeException(msg)
+/** A user-facing failure: sbt shows the message only, without a stack trace. */
+final class ProcessFailed(msg: String) extends RuntimeException(msg) with scala.util.control.NoStackTrace
 
 private[sourcedeps] object Proc:
   final case class Result(exitCode: Int, out: Seq[String]):
@@ -31,7 +32,7 @@ private[sourcedeps] object Proc:
     catch case e: java.io.IOException => Result(127, lines.toVector :+ s"failed to run ${cmd.head}: ${e.getMessage}")
 
   /** Runs a command and returns its output lines, failing with the full output otherwise. */
-  def checked(cmd: Seq[String], cwd: File): Seq[String] =
-    val r = run(cmd, cwd)()
+  def checked(cmd: Seq[String], cwd: File, env: Seq[(String, String)] = Nil): Seq[String] =
+    val r = run(cmd, cwd, env)()
     if !r.ok then throw ProcessFailed(s"`${cmd.mkString(" ")}` failed (exit ${r.exitCode}) in $cwd:\n${r.out.mkString("\n")}")
     r.out

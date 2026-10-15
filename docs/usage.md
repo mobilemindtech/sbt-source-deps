@@ -71,7 +71,9 @@ switching back is instant if the old one is still there.
 
 You can also edit files in the clone, for a quick experiment. The edits are detected and trigger a
 rebuild like a local directory would. Commit them elsewhere: the clone is managed by the plugin, and
-`sourceDepsClean` deletes it.
+`sourceDepsClean` deletes it. While tracked files have local edits, the plugin refuses to move the
+clone to another commit (after a `sourceDepsUpdate` or a ref change), so a build never mixes your
+edits with a different commit.
 
 ## Private repositories
 
@@ -83,7 +85,9 @@ sourceDependencies += SourceDep.git("git@github.com:my-company/internal-lib.git"
 ```
 
 Interactive prompts are not supported. Make sure `git clone <url>` works in a terminal without asking
-for a password or a host key confirmation before declaring the dependency.
+for a password or a host key confirmation before declaring the dependency. The plugin runs git with
+`GIT_TERMINAL_PROMPT=0` and, unless you set `GIT_SSH_COMMAND` yourself, with
+`GIT_SSH_COMMAND="ssh -o BatchMode=yes"`, so a missing credential fails at once instead of hanging.
 
 Build tools of the dependency resolve their own dependencies with their own configuration:
 `~/.m2/settings.xml` for Maven, `~/.gradle/gradle.properties` for Gradle, and your global `*.sbt`
@@ -179,6 +183,13 @@ lazy val app = project
 
 > `ThisBuild / sourceDependencies` has no effect: the plugin sets the default (`Nil`) on each project,
 > which takes precedence. Share a `val` instead.
+>
+> In sbt 2, a setting written at the top level of `build.sbt` (outside `.settings(...)`) applies to
+> every subproject. A top-level `sourceDependencies += greeter` therefore adds the dependency to all
+> of them, which is fine when that is what you want.
+
+Projects on different Scala versions can share an sbt dependency: each Scala binary version gets its
+own build of it (`greeter_2.13` and `greeter_3`), as long as the dependency cross-builds for both.
 
 Projects declaring the same dependency share one clone and one build, because the working
 directory belongs to the whole build. Concurrent resolutions from parallel tasks wait for each

@@ -45,7 +45,9 @@ $ copy-file changes/Greeter.scala greeter/...
 
 | Test | What it covers in addition |
 | --- | --- |
-| `local-sbt` | Cross-build selection (library defaults to 2.13, consumer on 3); forced version over a declared `greeter % "9.9.9"` that exists nowhere |
+| `local-sbt` | Cross-build selection (library defaults to 2.13, consumer on 3); forced version over a declared `greeter % "9.9.9"` that exists nowhere; `sourceDepsClean` removes the artifacts and the next compile rebuilds |
+| `git-refs` | Tag, commit and `HEAD` refs of one repository, each with `.subdir(...)`, one with `.named(...)`; the clone is not moved while it has local edits |
+| `sbt1-cross` | Dependency built with sbt 1.13; two consumer projects (Scala 2.13 and 3) get one variant each, both rebuilt after a change |
 | `git-sbt` | Clone of a git repository created by the test; a new commit on the branch is ignored until `sourceDepsUpdate` |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
 | `local-gradle` | Plain `java-library` without publishing configuration |
@@ -53,7 +55,7 @@ $ copy-file changes/Greeter.scala greeter/...
 | `local-scalacli` | `project.scala` with `publish.*` directives; falls back to the `scala` runner |
 
 Requirements: `git`, `mvn`, `gradle` and scala-cli (or `scala` ≥ 3.5) on the `PATH`. The Mill test
-downloads Mill and a JDK on the first run. A full `scripted` run takes about 5–10 minutes.
+downloads Mill and a JDK on the first run. A full `scripted` run takes about 10 minutes.
 
 ## Design decisions and findings
 
@@ -130,6 +132,29 @@ not understand the new `id::url` syntax.
 `java.net.URI#toString` renders `file:/path`, which git reads as an SSH host named `file`. It is
 normalized to `file:///path`.
 
+### Bare settings in a multi-project sbt 2 build (2026-10-15)
+
+In sbt 2, settings written at the top level of `build.sbt` apply to **every** subproject, not only
+the root. Helper tasks of the `git-refs` test ran in `byTag/` until they were moved into
+`root.settings(...)`. Worth remembering for users' builds too: `sourceDependencies += ...` at the top
+level adds the dependency to every project.
+
+### Git without prompts and over local edits (2026-10-15)
+
+- git runs with `GIT_TERMINAL_PROMPT=0`; `GIT_SSH_COMMAND="ssh -o BatchMode=yes"` is set only when the
+  user has not set `GIT_SSH_COMMAND`, so custom SSH commands keep working.
+- `git checkout --detach` carries non-conflicting local edits over to the new commit, which would build
+  a mix of both. The checkout is refused when `git status --porcelain --untracked-files=no` is not empty.
+  Untracked files are ignored on purpose (they are often scratch files); they still count in the
+  fingerprint.
+- `ProcessFailed` mixes in `NoStackTrace`: these are user-facing errors, and sbt printed a 30-line
+  stack trace for each.
+
+### `sourceDepsClean` prunes the repository
+
+Deleting only the version directories left `repo/<group>/<artifact>/` behind. Removing a version now
+also deletes artifact and group directories left without version subdirectories.
+
 ### Scaladoc and `lmcoursier`
 
 `publishLocal` of the plugin failed in `Compile / doc` ("undefined: new dataclass.data"). The
@@ -146,27 +171,26 @@ plugin's docs are disabled for now.
   - Scala cross-version selection for sbt dependencies;
   - `sourceDepsEnv`;
   - documentation.
+- Phase 3 (part 1):
+  - tests for sbt 1.x dependencies, several consumer Scala versions, git tags/commits/`HEAD`,
+    `.subdir`, `.named`, `sourceDepsClean`;
+  - git without prompts; refuse to move a clone with local edits; no stack traces for user errors.
 
-**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the six scripted tests above.
+**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the eight scripted tests above (the sbt 1.x
+dependency with sbt 1.13.0).
 
 **Not verified yet**
-- dependencies built with **sbt 1.x** (the generated settings file is meant to compile on both);
-- git refs by **tag** and **commit**, `HEAD`, `.subdir(...)` and `.named(...)`;
 - Maven CI-friendly versions (`${revision}`), Gradle multi-project builds, Mill multi-module builds and
   `CrossScalaModule`;
-- several consumer projects with different Scala versions;
-- `sourceDepsClean`;
 - macOS and Windows (paths, wrapper scripts, `sh` fallback).
 
 ## Roadmap
 
 Next steps, roughly in priority order:
 
-1. **Tests for what is not verified yet** (list above), starting with an sbt 1.x dependency and git
-   tags, commits and subdirectories.
-2. **Git robustness**: run git with `GIT_TERMINAL_PROMPT=0` (fail instead of prompting on a
-   terminal); offer shallow clones for large repositories; better message when the clone has local
-   edits.
+1. **Tests for what is not verified yet** (list above): Maven `${revision}`, Gradle multi-project,
+   Mill multi-module and `CrossScalaModule`.
+2. **Git robustness**: offer shallow clones for large repositories.
 3. **Clear errors** when a tool is missing (suggest `sourceDepsCommands`/a wrapper) and when a build
    publishes nothing.
 4. **Progress feedback**: log the elapsed time of each build; optionally stream the tool output at

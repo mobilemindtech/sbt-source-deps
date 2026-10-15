@@ -126,7 +126,19 @@ final class Engine(
 
   /** Deletes the version directories published with `suffix` (group/artifact/<version>). */
   private def removeVersion(suffix: String): Unit =
-    Poms.published(repo, suffix).foreach(c => sbt.io.IO.delete(Republish.versionDir(repo, c)))
+    Poms.published(repo, suffix).foreach { c =>
+      val dir = Republish.versionDir(repo, c)
+      sbt.io.IO.delete(dir)
+      prune(dir.getParentFile)
+    }
+
+  /** Deletes artifact and group directories left without any version directory (metadata files only). */
+  private def prune(dir: File): Unit =
+    val base = repo.getCanonicalFile
+    var current = dir.getCanonicalFile
+    while current != base && current.isDirectory && !Option(current.listFiles()).getOrElse(Array.empty[File]).exists(_.isDirectory) do
+      sbt.io.IO.delete(current)
+      current = current.getParentFile
 
 object Engine:
   private val jvmLocks = ConcurrentHashMap[String, ReentrantLock]()

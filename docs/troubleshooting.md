@@ -60,18 +60,21 @@ use a hash that exists in the remote.
 
 ## Git asks for a password, or hangs
 
-Interactive prompts are not supported. Make sure `git clone <url>` works without asking anything,
-using an SSH agent or a credential helper. See [private repositories](usage.md#private-repositories).
+Interactive prompts are not supported: git runs with `GIT_TERMINAL_PROMPT=0` and SSH in batch mode,
+so it fails with an authentication error instead of asking. Make sure `git clone <url>` works without
+asking anything, using an SSH agent or a credential helper. See
+[private repositories](usage.md#private-repositories).
 
 ## A branch does not pick up new commits
 
 This is by design: branches only move on `sourceDepsUpdate`. See
 [git repositories](usage.md#git-repositories).
 
-## `git checkout` fails in the clone
+## `cannot move the clone of ... it has local changes`
 
-Local edits in `.source-deps/<id>/src` conflict with the commit being checked out. Commit or discard
-them, or run `sourceDepsClean` to start over.
+Tracked files in `.source-deps/<id>/src` were edited, and the plugin needs to check out another
+commit (after `sourceDepsUpdate` or a ref change). The message lists the edited files. Commit or
+discard them (`git -C <dir> checkout -- .`), or run `sourceDepsClean` to start over.
 
 ## The dependency is rebuilt every time
 

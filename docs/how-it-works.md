@@ -139,9 +139,13 @@ means binary compatibility is your responsibility, as with `dependencyOverrides`
   clone, so any ref can be checked out later.
 - **Resolve ref**: `origin/<ref>` first, so that a branch follows the fetched remote, then `<ref>`
   (tags, commits). `HEAD` resolves to `origin/HEAD`.
-- **Checkout**: `git checkout --detach <commit>`, only when HEAD differs.
+- **Checkout**: `git checkout --detach <commit>`, only when HEAD differs. If tracked files have local
+  edits (`git status --porcelain --untracked-files=no`), the checkout is refused with the list of
+  edited files.
 - **Fetch**: `git fetch --tags --force origin`, only on `sourceDepsUpdate`, or once when the ref is
   unknown locally.
+- **No prompts**: git runs with `GIT_TERMINAL_PROMPT=0` and, unless already set,
+  `GIT_SSH_COMMAND="ssh -o BatchMode=yes"`.
 - URLs of the form `file:/path` (as produced by `java.net.URI`) are normalized to `file:///path`.
 
 ## Concurrency

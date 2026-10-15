@@ -9,3 +9,10 @@ $ exists .source-deps/repo/example/greeter_3
 # a change in the dependency sources triggers a rebuild on the next compile
 $ copy-file changes/Greeter.scala greeter/src/main/scala/Greeter.scala
 > run v2
+
+# sourceDepsClean removes the published artifacts; the next compile builds again
+> sourceDepsClean
+$ absent .source-deps/repo/example
+> sourceDepsStatus
+> run v2
+$ exists .source-deps/repo/example/greeter_3

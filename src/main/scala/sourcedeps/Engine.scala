@@ -12,53 +12,73 @@ import sbt.util.Logger
  * Layout under the root directory:
  *   repo/          isolated Maven repository shared by all source dependencies
  *   <id>/src/      git clone (git dependencies only)
- *   <id>/state     last published version, used to clean up stale artifacts
+ *   <id>/state-*   last published version per variant, used to clean up stale artifacts
  */
-final class Engine(root: File, commands: Map[BuildTool, Seq[String]], log: Logger):
+final case class Resolved(selected: Seq[Coordinates], published: Seq[Coordinates])
+
+final class Engine(
+    root: File,
+    commands: Map[BuildTool, Seq[String]],
+    env: Map[String, String],
+    scalaBinaryVersion: String,
+    log: Logger
+):
   val repo: File = new File(root, "repo")
 
   /** Bump to invalidate every previously published artifact (e.g. when builder flags change). */
-  private val formatVersion = "1"
+  private val formatVersion = "2"
 
-  def resolve(dep: SourceDep, fetch: Boolean = false): Seq[Coordinates] =
+  /** Builds `dep` when stale; returns the selected modules and every module the build published. */
+  def resolve(dep: SourceDep, fetch: Boolean = false): Resolved =
     val home = new File(root, dep.id)
     Engine.withLock(home) {
       val projectDir = checkout(dep, home, fetch)
-      val tool = dep.tool.orElse(Builders.detect(projectDir)).getOrElse {
+      val tool = detect(dep, projectDir).getOrElse {
         throw ProcessFailed(s"could not detect the build tool of $dep in $projectDir (use .buildTool(...))")
       }
-      val fp = Hashing.fingerprint(projectDir, Seq(s"format=$formatVersion", s"tool=$tool"))
-      val suffix = s"+src.${fp.take(12)}"
+      val (suffix, variant) = versionSuffix(projectDir, tool)
 
       val published = Poms.published(repo, suffix) match
         case Seq() =>
           log.info(s"[source-deps] building $dep with ${tool.toString.toLowerCase} (sources changed)")
-          Builders.forTool(tool).publish(BuildRequest(projectDir, repo, home, suffix, commands, log, dep.id))
+          val req = BuildRequest(projectDir, repo, home, suffix, scalaBinaryVersion, commands, env, log, dep.id)
+          Builders.forTool(tool).publish(req)
           val result = Poms.published(repo, suffix)
           if result.isEmpty then throw ProcessFailed(s"the build of $dep did not publish any module into $repo")
-          removeStale(home, suffix)
-          writeState(home, suffix)
+          readState(home, variant).filter(_ != suffix).foreach(removeVersion)
+          writeState(home, variant, suffix)
           result
         case existing =>
           log.debug(s"[source-deps] $dep is up to date ($suffix)")
           existing
 
-      select(dep, published)
+      Resolved(select(dep, published), published)
     }
 
   /** Up-to-date check without building anything: Some(true) when fresh, None when not checked out yet. */
   def isUpToDate(dep: SourceDep): Option[Boolean] =
     val home = new File(root, dep.id)
     projectDir(dep, home).filter(_.isDirectory).map { dir =>
-      val tool = dep.tool.orElse(Builders.detect(dir)).map(_.toString).getOrElse("?")
-      val fp = Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool"))
-      Poms.published(repo, s"+src.${fp.take(12)}").nonEmpty
+      detect(dep, dir).exists(tool => Poms.published(repo, versionSuffix(dir, tool)._1).nonEmpty)
     }
 
   def clean(dep: SourceDep): Unit =
     val home = new File(root, dep.id)
-    readState(home).foreach(removeVersion)
+    Option(home.listFiles()).getOrElse(Array.empty[File])
+      .filter(_.getName.startsWith("state-"))
+      .foreach(f => readState(home, f.getName.stripPrefix("state-")).foreach(removeVersion))
     sbt.io.IO.delete(home)
+
+  private def detect(dep: SourceDep, dir: File): Option[BuildTool] = dep.tool.orElse(Builders.detect(dir))
+
+  /**
+   * The suffix appended to every published version, derived from the sources. sbt builds pick the
+   * consumer's Scala version, so they get one variant per Scala binary version.
+   */
+  private def versionSuffix(dir: File, tool: BuildTool): (String, String) =
+    val variant = if tool == BuildTool.Sbt then s"scala-$scalaBinaryVersion" else "default"
+    val fp = Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant"))
+    (s"+src.${fp.take(12)}", variant)
 
   private def projectDir(dep: SourceDep, home: File): Option[File] =
     val base = dep.location match
@@ -88,31 +108,25 @@ final class Engine(root: File, commands: Map[BuildTool, Seq[String]], log: Logge
   /** `core_3` -> `core`, `core_2.13` -> `core`, `plugin_2.12_1.0` -> `plugin`. */
   private def baseName(artifactId: String): String = artifactId.replaceAll("(_[0-9][0-9.]*(-[A-Za-z0-9]+)?)+$", "")
 
-  private def stateFile(home: File) = new File(home, "state")
+  private def stateFile(home: File, variant: String) = new File(home, s"state-$variant")
 
-  private def readState(home: File): Option[String] =
-    val f = stateFile(home)
+  private def readState(home: File, variant: String): Option[String] =
+    val f = stateFile(home, variant)
     if !f.isFile then None
     else
       val p = Properties()
       sbt.io.Using.fileInputStream(f)(p.load)
       Option(p.getProperty("suffix"))
 
-  private def writeState(home: File, suffix: String): Unit =
+  private def writeState(home: File, variant: String, suffix: String): Unit =
     home.mkdirs()
     val p = Properties()
     p.setProperty("suffix", suffix)
-    sbt.io.Using.fileOutputStream()(stateFile(home))(p.store(_, "sbt-source-deps"))
-
-  private def removeStale(home: File, current: String): Unit =
-    readState(home).filter(_ != current).foreach(removeVersion)
+    sbt.io.Using.fileOutputStream()(stateFile(home, variant))(p.store(_, "sbt-source-deps"))
 
   /** Deletes the version directories published with `suffix` (group/artifact/<version>). */
   private def removeVersion(suffix: String): Unit =
-    Poms.published(repo, suffix).foreach(c => sbt.io.IO.delete(versionDir(c)))
-
-  private def versionDir(c: Coordinates): File =
-    new File(repo, (c.groupId.split('.').toSeq :+ c.artifactId :+ c.version).mkString(File.separator))
+    Poms.published(repo, suffix).foreach(c => sbt.io.IO.delete(Republish.versionDir(repo, c)))
 
 object Engine:
   private val jvmLocks = ConcurrentHashMap[String, ReentrantLock]()

@@ -1,0 +1,10 @@
+plugins {
+  id 'java-library'
+}
+
+group = 'example'
+version = '1.0.0'
+
+tasks.withType(JavaCompile).configureEach {
+  options.release = 17
+}

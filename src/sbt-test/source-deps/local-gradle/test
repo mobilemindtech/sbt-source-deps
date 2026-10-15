@@ -1,0 +1,11 @@
+# first build: the dependency is built and published to the isolated repo
+> run v1
+$ exists .source-deps/repo/example/greeter
+
+# unchanged sources: nothing is rebuilt
+> sourceDepsStatus
+> run v1
+
+# a change in the dependency sources triggers a rebuild on the next compile
+$ copy-file changes/Greeter.java greeter/src/main/java/greeter/Greeter.java
+> run v2

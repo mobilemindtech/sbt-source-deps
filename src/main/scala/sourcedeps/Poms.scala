@@ -8,14 +8,27 @@ final case class Coordinates(groupId: String, artifactId: String, version: Strin
   override def toString: String = s"$groupId:$artifactId:$version"
 
 private[sourcedeps] object Poms:
-  /** All modules published into `repo` whose version ends with `versionSuffix`. */
+  /**
+   * All modules published into the Maven repository `repo` whose version ends with `versionSuffix`.
+   * Coordinates come from the repository layout (group/artifact/version/artifact-version.pom): raw
+   * POMs may still hold placeholders such as `${revision}`; the POM only contributes the packaging.
+   */
   def published(repo: File, versionSuffix: String): Seq[Coordinates] =
     if !repo.isDirectory then Nil
     else
+      val root = repo.toPath
       sbt.io.PathFinder(repo).**(sbt.io.GlobFilter("*.pom")).get()
-        .filter(_.getParentFile.getName.endsWith(versionSuffix))
-        .flatMap(read)
-        .filter(_.version.endsWith(versionSuffix))
+        .flatMap { pom =>
+          val versionDir = pom.getParentFile
+          val artifactDir = versionDir.getParentFile
+          val version = versionDir.getName
+          val artifact = artifactDir.getName
+          val groupPath = root.relativize(artifactDir.getParentFile.toPath).toString
+          if !version.endsWith(versionSuffix) || pom.getName != s"$artifact-$version.pom" || groupPath.isEmpty then None
+          else
+            val group = groupPath.replace(File.separatorChar, '.')
+            Some(Coordinates(group, artifact, version, read(pom).map(_.packaging).getOrElse("jar")))
+        }
         .distinct
         .sortBy(_.toString)
 

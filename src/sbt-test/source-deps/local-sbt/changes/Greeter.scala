@@ -1,4 +1,5 @@
 package greeter
 
-object Greeter:
-  def message: String = "v2"
+object Greeter {
+  def message(): String = "v2"
+}

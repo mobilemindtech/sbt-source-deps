@@ -8,9 +8,9 @@
         │                                                                              │
         │   1. checkout     git clone / checkout ref        (local: use the directory) │
         │   2. detect       build.mill? build.sbt? build.gradle? pom.xml? project.scala?│
-        │   3. fingerprint  sha256(files) → suffix "+src.<12 hex>"                     │
+        │   3. fingerprint  sha256(files + nested deps) → suffix "+src.<12 hex>"       │
         │   4. up to date?  repo/ already has versions ending in the suffix → done     │
-        │   5. build        tool publishes into repo/ (sbt) or staging/ → republish    │
+        │   5. build        tool publishes into staging/ → republish with the suffix   │
         │   6. clean up     delete the previous suffix of this dependency              │
         └──────────────────────────────────────────────────────────────────────────────┘
         │
@@ -46,7 +46,9 @@ The fingerprint decides whether a dependency must be rebuilt. It is a SHA-256 ov
 - a format version of the plugin (bumped when builders change in incompatible ways);
 - the build tool;
 - the variant (the consumer's Scala binary version for sbt dependencies, `default` otherwise);
-- for each file of the project, sorted by path: its relative path and its **content**.
+- for each file of the project, sorted by path: its relative path and its **content**;
+- for each [nested source dependency](#dependencies-that-use-the-plugin) recorded by the previous
+  build: its id and its current suffix, computed the same way (recursively).
 
 The files are listed as follows:
 
@@ -63,6 +65,11 @@ forth, or restoring a cache never causes a useless rebuild, and a real change is
 ## Versions
 
 The suffix is `+src.` followed by the first 12 hex digits of the fingerprint.
+
+The suffix is computed again **after** the build, because the build may have recorded nested source
+dependencies (on the first build, or when the dependency's own `sourceDependencies` changed). The
+artifacts are published under that final suffix, so the next up-to-date check computes the same
+value and does not rebuild.
 
 **Why change the version at all?** If the jar were overwritten under the same version:
 
@@ -82,26 +89,27 @@ conflict resolution cannot be trusted to pick the source build. That is why vers
 
 ## Publishing
 
+Every build tool publishes with the project's own version into `<dependency>/staging`, a Maven
+repository local to the dependency. The plugin then republishes the modules into `repo/` with the
+suffix.
+
 ### sbt dependencies
 
-sbt can publish anywhere with any version if the settings are changed after loading. The plugin
-generates a global settings directory (`-Dsbt.global.settings`) containing a copy of your global
-`*.sbt` files and an `onLoad` hook. Once the build is loaded, the hook:
+The plugin generates a global settings directory (`-Dsbt.global.settings`) containing a copy of your
+global `*.sbt` files and an `onLoad` hook. Once the build is loaded, the hook:
 
-1. reads each project's `version`, `scalaVersion` and `crossScalaVersions` from the loaded state;
-2. appends constant settings: the suffixed version, the selected Scala version, `publishTo` and
-   `publishMavenStyle`;
-3. stops if the versions already end with the suffix, because `appendWithSession` reloads the session,
-   which runs `onLoad` again.
+1. reads each project's `scalaVersion` and `crossScalaVersions` from the loaded state;
+2. appends constant settings: the selected Scala version, `publishTo` (the staging repository) and
+   `publishMavenStyle`, plus a marker key;
+3. stops when every project has the marker, because `appendWithSession` reloads the session, which
+   runs `onLoad` again.
 
-Constants are used instead of `(ref / version).value` because global settings also reach the
+Constants are used instead of `(ref / scalaVersion).value` because global settings also reach the
 meta-build (`project/`), where self-references create cycles.
 
-### Other tools: staging and republishing
+### Republishing
 
-Maven, Gradle, Mill and scala-cli publish with the project's own version into
-`<dependency>/staging`, a Maven repository local to the dependency. The plugin then republishes every
-module found there into `repo/`:
+For every module found in `staging/`:
 
 1. The coordinates are taken from the repository layout (`group/artifact/version/`), because raw POMs
    may contain placeholders such as `${revision}`.
@@ -116,6 +124,29 @@ module found there into `repo/`:
 4. SHA-1 and MD5 checksums are regenerated.
 
 This keeps the builders simple: they only need to publish to a directory, which every tool supports.
+
+## Dependencies that use the plugin
+
+A dependency built with sbt may declare `sourceDependencies` itself (app → middle → greeter). When
+the plugin launches the nested sbt, it passes three system properties, which the plugin running inside
+that build reads:
+
+| Property | Effect in the nested build |
+| --- | --- |
+| `sbt.source-deps.dir` | Default of `sourceDepsDirectory`: nested dependencies are cloned, built and published in the **outer** working directory, so the outer build finds them in `repo/`. A dependency declared at several levels is built once. |
+| `sbt.source-deps.record` | Each source dependency the nested build resolves is recorded in `<middle>/nested-<variant>/`: location, ref, subdirectory, tool, modules and Scala binary version. |
+| `sbt.source-deps.chain` | The ids of the dependencies being built. A dependency already in the chain fails with `cycle between source dependencies: a -> b -> a` instead of waiting forever on its own lock. Chains deeper than 16 fail too. |
+
+The outer build uses the records to:
+
+- include each nested dependency's current suffix in the fingerprint, so a change in greeter rebuilds
+  middle (whose POM must point at the new greeter);
+- fetch nested git dependencies on `sourceDepsUpdate`;
+- force the versions of the nested modules too, since they come transitively.
+
+The properties are ignored by builds that do not use the plugin. A dependency using an older version
+of the plugin, or built with sbt 1.x (the plugin requires sbt 2), keeps its nested dependencies in
+its own `.source-deps`, and the outer build fails to resolve them.
 
 ## Forced versions
 

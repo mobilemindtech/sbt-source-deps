@@ -3,33 +3,28 @@ package sourcedeps
 import java.io.File
 import sbt.util.Logger
 
-/** Everything a builder needs to publish a project into the isolated Maven repository. */
+/** Where an sbt dependency that uses this plugin itself puts its own source dependencies (see [[Nested]]). */
+final case class NestedContext(root: File, recordDir: File, chain: Seq[String])
+
+/** Everything a builder needs to publish a project into a staging Maven repository. */
 final case class BuildRequest(
     projectDir: File,
-    repo: File,
+    staging: File,
     workDir: File,
-    versionSuffix: String,
     scalaBinaryVersion: String,
     commands: Map[BuildTool, Seq[String]],
     env: Map[String, String],
     log: Logger,
-    label: String
+    label: String,
+    nested: NestedContext
 )
 
+/**
+ * Builders publish every module with the project's own version into `req.staging`, an empty Maven
+ * repository; the engine then republishes them with the version suffix (see [[Republish]]).
+ */
 trait Builder:
-  /** Publishes every module of the project into `req.repo`, with versions ending in `req.versionSuffix`. */
   def publish(req: BuildRequest): Unit
-
-/** Builders that can only publish with the project's own version: they publish into a staging repository first. */
-abstract class StagingBuilder extends Builder:
-  protected def publishTo(req: BuildRequest, staging: File): Unit
-
-  final def publish(req: BuildRequest): Unit =
-    val staging = new File(req.workDir, "staging")
-    sbt.io.IO.delete(staging)
-    staging.mkdirs()
-    publishTo(req, staging)
-    Republish(staging, req.repo, req.versionSuffix)
 
 object Builders:
   /** Detection order matters: a mill/sbt project may also carry a pom.xml or build.gradle for other users. */
@@ -84,13 +79,17 @@ object SbtBuilder extends Builder:
     val cmd = Builders.launcher(req, BuildTool.Sbt, None) ++ Seq(
       "--server", "--batch", "--no-colors", "--supershell=never",
       s"-Dsbt.global.settings=${globalSettings.getAbsolutePath}",
+      // read by this plugin when the dependency uses it too; ignored otherwise
+      s"-D${Nested.DirProp}=${req.nested.root.getAbsolutePath}",
+      s"-D${Nested.RecordProp}=${req.nested.recordDir.getAbsolutePath}",
+      s"-D${Nested.ChainProp}=${req.nested.chain.mkString(",")}",
       "publish"
     )
     Builders.runLogged(req, cmd)
 
   /**
-   * `set every version ~= ...` is cyclic, and `set every version := ...` would lose each project's own
-   * version, so the overrides are appended after load through a global settings file instead. The user's
+   * The overrides are appended after load through a global settings file: `set every ...` cannot pick
+   * a different Scala version per project, and the dependency's directory is never modified. The user's
    * own global `*.sbt` files are copied next to it so credentials/resolvers defined there keep working.
    */
   private def prepareGlobalSettings(req: BuildRequest): File =
@@ -103,7 +102,7 @@ object SbtBuilder extends Builder:
       .foreach(f => sbt.io.IO.copyFile(f, new File(dir, f.getName)))
     sbt.io.IO.write(
       new File(dir, "zz-source-deps.sbt"),
-      overrides(req.versionSuffix, req.repo.toURI.toString, req.scalaBinaryVersion)
+      overrides(Builders.fileUri(req.staging), req.scalaBinaryVersion)
     )
     dir
 
@@ -121,18 +120,20 @@ object SbtBuilder extends Builder:
   /**
    * Must compile on both sbt 1.x (Scala 2.12) and sbt 2.x (Scala 3). Global settings also reach the
    * meta-build, so every override is a constant read from the loaded build: deriving it from the key
-   * itself (`(ref / scalaVersion).value`) creates cycles there. Besides the version and the repository,
-   * each project switches to the entry of its `crossScalaVersions` matching the consumer's Scala binary
+   * itself (`(ref / scalaVersion).value`) creates cycles there. Besides the staging repository, each
+   * project switches to the entry of its `crossScalaVersions` matching the consumer's Scala binary
    * version, when there is one.
    */
-  private def overrides(suffix: String, repoUri: String, scalaBinary: String): String =
-    s"""Global / onLoad := {
+  private def overrides(repoUri: String, scalaBinary: String): String =
+    s"""val sourceDepsStagingApplied = settingKey[Boolean]("set by sbt-source-deps once its overrides are applied")
+       |
+       |Global / onLoad := {
        |  val previous = (Global / onLoad).value
        |  previous.andThen { state =>
        |    val extracted = Project.extract(state)
        |    val refs = extracted.structure.allProjectRefs
        |    // appendWithSession reloads the session, which runs onLoad again: stop once applied
-       |    if (refs.forall(ref => extracted.get(ref / version).endsWith("$suffix"))) state
+       |    if (refs.forall(ref => extracted.getOpt(ref / sourceDepsStagingApplied).contains(true))) state
        |    else {
        |      def binary(v: String) = sbt.librarymanagement.CrossVersion.binaryScalaVersion(v)
        |      val settings = refs.flatMap { ref =>
@@ -141,9 +142,9 @@ object SbtBuilder extends Builder:
        |          if (binary(current) == "$scalaBinary") current
        |          else extracted.get(ref / crossScalaVersions).find(v => binary(v) == "$scalaBinary").getOrElse(current)
        |        Seq(
-       |          ref / version := extracted.get(ref / version) + "$suffix",
        |          ref / scalaVersion := scala,
-       |          ref / publishTo := Some("source-deps" at "$repoUri"),
+       |          ref / sourceDepsStagingApplied := true,
+       |          ref / publishTo := Some("source-deps-staging" at "$repoUri"),
        |          ref / publishMavenStyle := true,
        |          ref / Compile / packageDoc / publishArtifact := false
        |        )
@@ -154,20 +155,20 @@ object SbtBuilder extends Builder:
        |}
        |""".stripMargin
 
-object MavenBuilder extends StagingBuilder:
-  protected def publishTo(req: BuildRequest, staging: File): Unit =
+object MavenBuilder extends Builder:
+  def publish(req: BuildRequest): Unit =
     val cmd = Builders.launcher(req, BuildTool.Maven, Some("mvnw")) ++ Seq(
       "--batch-mode", "--no-transfer-progress",
       "-DskipTests", "-Dmaven.javadoc.skip=true", "-Dgpg.skip=true",
-      s"-DaltDeploymentRepository=source-deps::default::${Builders.fileUri(staging)}",
+      s"-DaltDeploymentRepository=source-deps::default::${Builders.fileUri(req.staging)}",
       "deploy"
     )
     Builders.runLogged(req, cmd)
 
-object GradleBuilder extends StagingBuilder:
-  protected def publishTo(req: BuildRequest, staging: File): Unit =
+object GradleBuilder extends Builder:
+  def publish(req: BuildRequest): Unit =
     val init = new File(req.workDir, "source-deps.init.gradle")
-    sbt.io.IO.write(init, initScript(Builders.fileUri(staging)))
+    sbt.io.IO.write(init, initScript(Builders.fileUri(req.staging)))
     val cmd = Builders.launcher(req, BuildTool.Gradle, Some("gradlew")) ++ Seq(
       "--init-script", init.getAbsolutePath, "--console=plain",
       "publishAllPublicationsToSourceDepsStagingRepository"
@@ -191,21 +192,21 @@ object GradleBuilder extends StagingBuilder:
        |}
        |""".stripMargin
 
-object MillBuilder extends StagingBuilder:
-  protected def publishTo(req: BuildRequest, staging: File): Unit =
+object MillBuilder extends Builder:
+  def publish(req: BuildRequest): Unit =
     val cmd = Builders.launcher(req, BuildTool.Mill, Some("mill")) ++ Seq(
       "--no-server", "--ticker", "false",
-      "__.publishM2Local", "--m2RepoPath", staging.getAbsolutePath
+      "__.publishM2Local", "--m2RepoPath", req.staging.getAbsolutePath
     )
     Builders.runLogged(req, cmd)
 
-object ScalaCliBuilder extends StagingBuilder:
-  protected def publishTo(req: BuildRequest, staging: File): Unit =
+object ScalaCliBuilder extends Builder:
+  def publish(req: BuildRequest): Unit =
     // since Scala 3.5 the `scala` runner is scala-cli itself
     val launcher = Builders.launcher(req, BuildTool.ScalaCli, None) match
       case Seq("scala-cli") if !Builders.onPath("scala-cli") && Builders.onPath("scala") => Seq("scala")
       case other                                                                       => other
     val cmd = launcher ++ Seq(
-      "--power", "publish", ".", "--publish-repository", Builders.fileUri(staging)
+      "--power", "publish", ".", "--publish-repository", Builders.fileUri(req.staging)
     )
     Builders.runLogged(req, cmd)

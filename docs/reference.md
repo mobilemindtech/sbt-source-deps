@@ -98,7 +98,8 @@ files.
 └── greeter-1a2b3c4d/                     one directory per dependency (its id)
     ├── src/                              git clone (git dependencies only)
     ├── state-default                     last published suffix, per variant (state-scala-3 for sbt)
-    ├── staging/                          publication with the original versions (non-sbt tools)
+    ├── staging/                          publication with the original versions
+    ├── nested-scala-3/                   source dependencies of the dependency's own build (sbt only)
     ├── sbt-global-settings/              generated global settings (sbt only)
     ├── source-deps.init.gradle           generated init script (Gradle only)
     └── .lock                             file lock serializing work on this dependency

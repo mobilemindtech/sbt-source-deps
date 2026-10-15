@@ -11,6 +11,7 @@ setting, task and method.
 - [Forcing the build tool](#forcing-the-build-tool)
 - [Several dependencies](#several-dependencies)
 - [Multi-project builds](#multi-project-builds)
+- [Dependencies that use sbt-source-deps too](#dependencies-that-use-sbt-source-deps-too)
 - [Switching between a local checkout and git](#switching-between-a-local-checkout-and-git)
 - [Java libraries (Maven, Gradle)](#java-libraries-maven-gradle)
 - [Scala versions and cross-building](#scala-versions-and-cross-building)
@@ -164,7 +165,8 @@ sourceDependencies ++= Seq(
 )
 ```
 
-Dependencies are resolved one after another, and each is only rebuilt when its own sources changed.
+Dependencies are resolved one after another, and each is only rebuilt when its own sources (or its
+[own source dependencies](#dependencies-that-use-sbt-source-deps-too)) changed.
 
 ## Multi-project builds
 
@@ -194,6 +196,37 @@ own build of it (`greeter_2.13` and `greeter_3`), as long as the dependency cros
 Projects declaring the same dependency share one clone and one build, because the working
 directory belongs to the whole build. Concurrent resolutions from parallel tasks wait for each
 other.
+
+## Dependencies that use sbt-source-deps too
+
+A dependency built with sbt can declare its own source dependencies. Nothing special is needed on
+either side:
+
+```scala
+// middle/build.sbt (the dependency)
+sourceDependencies += SourceDep.local(file("../greeter"))
+
+// app/build.sbt (your project)
+sourceDependencies += SourceDep.local(file("../middle"))
+```
+
+When `app` builds `middle`, `middle`'s own source dependencies are built into **`app`'s**
+`.source-deps` (not `middle/.source-deps`), so `app` resolves `greeter` through `middle`'s POM. Then:
+
+- a change in `greeter` rebuilds `greeter` and `middle` on `app`'s next compile;
+- `sourceDepsUpdate` in `app` also fetches `middle`'s git dependencies;
+- `greeter`'s version is forced in `app` like `middle`'s;
+- if `app` declares `greeter` too, both levels share one build of it;
+- a cycle (`a` → `b` → `a`) fails with `cycle between source dependencies: ...`.
+
+Requirements:
+
+- the dependency must use a version of the plugin that supports this (0.1.0 or later) and must not
+  set `sourceDepsDirectory` itself;
+- `sourceDepsClean` in `app` cleans `middle`, not `greeter`; clean `greeter` by declaring it, or
+  delete `.source-deps`.
+
+See [how it works](how-it-works.md#dependencies-that-use-the-plugin) for the details.
 
 ## Switching between a local checkout and git
 

@@ -55,7 +55,7 @@ Ignore the plugin's working directory:
 
 ```
 app> sbt compile
-[info] [source-deps] building ../greeter with sbt (sources changed)
+[info] [source-deps] building ../greeter with sbt (first build)
 [info] [source-deps] greeter-1a2b3c4d: sbt --server --batch ... publish
 [info] compiling 1 Scala source ...
 [success]
@@ -78,7 +78,7 @@ Edit `../greeter/src/main/scala/greeter/Greeter.scala`, then compile `app` again
 
 ```
 app> sbt compile
-[info] [source-deps] building ../greeter with sbt (sources changed)
+[info] [source-deps] building ../greeter with sbt (changed since the last build)
 ...
 ```
 
@@ -99,7 +99,7 @@ commit, run:
 app> sbt sourceDepsUpdate
 [info] [source-deps] fetching https://github.com/example/greeter.git
 [info] [source-deps] checking out main (9f8e7d6c5b) in .source-deps/greeter-.../src
-[info] [source-deps] building https://github.com/example/greeter.git@main with sbt (sources changed)
+[info] [source-deps] building https://github.com/example/greeter.git@main with sbt (first build)
 ```
 
 Next: [Usage and examples](usage.md).

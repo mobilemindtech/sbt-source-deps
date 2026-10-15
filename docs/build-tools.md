@@ -49,18 +49,21 @@ When the build fails, its last 80 lines are logged as errors.
 **Command**
 
 ```
-sbt --server --batch --no-colors --supershell=never -Dsbt.global.settings=<dir> publish
+sbt --server --batch --no-colors --supershell=never -Dsbt.global.settings=<dir> \
+    -Dsbt.source-deps.dir=<root> -Dsbt.source-deps.record=<dir> -Dsbt.source-deps.chain=<ids> publish
 ```
 
-**How the version is changed.** `set every version ~= ...` creates cyclic references, and
-`set every version := ...` would give every project the same version. Instead, the plugin generates
-a global settings directory with an `onLoad` hook that runs once the build is loaded. For each
-project the hook:
+The `sbt.source-deps.*` properties only matter when the dependency uses this plugin itself (see
+[how it works](how-it-works.md#dependencies-that-use-the-plugin)).
 
-- appends the suffix to its version;
+**How the build is adjusted.** `set every ...` cannot pick a different Scala version per project.
+Instead, the plugin generates a global settings directory with an `onLoad` hook that runs once the
+build is loaded. For each project the hook:
+
 - switches `scalaVersion` to the `crossScalaVersions` entry matching your Scala binary version, when
   there is one;
-- sets `publishTo` to the isolated repository and `publishMavenStyle := true`;
+- sets `publishTo` to the staging repository and `publishMavenStyle := true` (the version suffix is
+  added when republishing, like for the other tools);
 - disables the Scaladoc jar (`Compile / packageDoc / publishArtifact := false`) to save time.
 
 **Your global settings are kept.** Because `-Dsbt.global.settings` replaces your global settings
@@ -70,8 +73,7 @@ plugins (`~/.sbt/<series>/plugins`) are untouched.
 
 **Requirements**
 
-- The generated file is written to compile on both sbt 1.x and 2.x. So far only sbt 2.0.10
-  dependencies are tested.
+- The generated file compiles on both sbt 1.x and 2.x (tested with 1.13.0 and 2.0.10).
 - Projects with `publish / skip := true` are not published, as usual.
 - A build that publishes nothing fails with `the build of ... did not publish any module`.
 
@@ -233,7 +235,8 @@ Each tool is covered by a scripted test (`src/sbt-test/source-deps/`):
 
 | Tool | Version | Test |
 | --- | --- | --- |
-| sbt | 2.0.10 | `local-sbt`, `git-sbt` |
+| sbt | 2.0.10 | `local-sbt`, `git-sbt`, `git-refs`, `nested-sbt`, `nested-cycle` |
+| sbt | 1.13.0 | `sbt1-cross` |
 | Maven | 3.9.9 | `local-maven` (reactor with parent) |
 | Gradle | 9.8.0 | `local-gradle` |
 | Mill | 1.3.0 (via `./mill`) | `local-mill` |

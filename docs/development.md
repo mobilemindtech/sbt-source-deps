@@ -21,7 +21,8 @@ Central, which requires a Javadoc jar. An empty jar is enough.
 | --- | --- |
 | `SourceDepsPlugin.scala` | Keys, defaults, and wiring into `resolvers`, `allDependencies` and `csrConfiguration` |
 | `SourceDep.scala` | User-facing model: `SourceDep`, `SourceLocation`, `BuildTool` |
-| `Engine.scala` | Per-dependency flow: lock, checkout, fingerprint, build, select modules, clean up, state files |
+| `Engine.scala` | Per-dependency flow: lock, checkout, fingerprint, build, republish, select modules, clean up, state files |
+| `Nested.scala` | Dependencies whose own build uses the plugin: system properties, records, cycle chain |
 | `Builders.scala` | Tool detection, launch commands, and one builder per tool (`SbtBuilder`, `MavenBuilder`, ...) |
 | `Republish.scala` | Staging → isolated repository: suffixed versions, POM rewriting, checksums |
 | `Poms.scala` | Lists modules of a Maven repository directory; reads POM packaging |
@@ -47,6 +48,8 @@ $ copy-file changes/Greeter.scala greeter/...
 | --- | --- |
 | `local-sbt` | Cross-build selection (library defaults to 2.13, consumer on 3); forced version over a declared `greeter % "9.9.9"` that exists nowhere; `sourceDepsClean` removes the artifacts and the next compile rebuilds |
 | `git-refs` | Tag, commit and `HEAD` refs of one repository, each with `.subdir(...)`, one with `.named(...)`; the clone is not moved while it has local edits |
+| `nested-sbt` | The dependency (`middle`) uses the plugin for its own dependency (`greeter`): built into the consumer's directory, `greeter` forced over a declared `9.9.9`, a change in `greeter` rebuilds `middle` |
+| `nested-cycle` | `a` → `b` → `a` fails with a cycle error |
 | `sbt1-cross` | Dependency built with sbt 1.13; two consumer projects (Scala 2.13 and 3) get one variant each, both rebuilt after a change |
 | `git-sbt` | Clone of a git repository created by the test; a new commit on the branch is ignored until `sourceDepsUpdate` |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
@@ -80,6 +83,9 @@ All the plugin's tasks use `Def.uncached(...)`.
 
 ### Changing the version of an sbt build
 
+> Superseded on 2026-10-15: sbt builds now publish through staging (see "Dependencies that use the
+> plugin" below). The `onLoad` approach is still used for the Scala version and `publishTo`.
+
 - `set every version ~= (_ + suffix)` creates a **cyclic reference** (`Global / version` ↔ project
   version).
 - `set every version := "x"` gives all projects the same version and loses the original.
@@ -110,12 +116,12 @@ Conflict resolution alone could therefore pick a transitive release over the sou
 published module is forced through `csrConfiguration.withForceVersions` (`dependencyOverrides` is a
 setting in sbt 2, so it cannot depend on the build's result).
 
-### Staging and republishing for non-sbt tools
+### Staging and republishing
 
 Changing the version is tool-specific and invasive: `mvn versions:set` rewrites POMs, and Gradle
 needs `afterEvaluate` tricks. Publishing with the original version into a staging repository, then
 copying with the suffix and rewriting the POMs, works the same way for Maven, Gradle, Mill and
-scala-cli.
+scala-cli, and since 2026-10-15 for sbt too.
 
 ### Coordinates from the repository layout
 
@@ -155,6 +161,34 @@ level adds the dependency to every project.
 Deleting only the version directories left `repo/<group>/<artifact>/` behind. Removing a version now
 also deletes artifact and group directories left without version subdirectories.
 
+### Dependencies that use the plugin (2026-10-15)
+
+Tried with app → middle (uses the plugin) → greeter. Findings, in order:
+
+1. **Name clash.** The `publishTo` injected into middle's build and the resolver middle's own plugin
+   adds were both named `source-deps`. Ivy picks repositories by name, so middle published into its
+   own `.source-deps/repo` and the outer build saw nothing. The injected repository now has its own
+   name.
+2. **Isolated nested repository.** middle's POM pointed at `greeter 1.0.0+src.x`, which existed only in
+   `middle/.source-deps`. Fixed by sharing the outer working directory through
+   `-Dsbt.source-deps.dir`.
+3. **No cascade.** middle's fingerprint ignored greeter. The nested plugin now records what it resolved
+   (`-Dsbt.source-deps.record`), and the outer fingerprint includes each recorded dependency's current
+   suffix, recursively. Nested modules are forced as well.
+4. **The suffix depends on the build's output.** The records only exist after the first build, so a
+   suffix computed before it would differ from every later check, and the build after it would be a
+   useless rebuild. **Chosen**: sbt publishes into staging with its own version like the other tools,
+   and the final suffix is computed after the build, then applied by `Republish`. This also removed the
+   version override from the generated sbt settings.
+5. **Cycles** would deadlock on the per-dependency file locks (the outer process holds `a`'s lock while
+   `b`'s build waits for it). The chain of ids is passed down with `-Dsbt.source-deps.chain`.
+
+- `publishTo` is a task in sbt 2, so the `onLoad` guard cannot read it. The generated file now defines
+  its own marker key (`sourceDepsStagingApplied`), read with `extracted.getOpt`, which works on sbt 1
+  and 2.
+- Records keep the nested build's id verbatim (as `alias`): a relative `file("../greeter")` is resolved
+  against the nested build's directory, so the outer build could not recompute it.
+
 ### Scaladoc and `lmcoursier`
 
 `publishLocal` of the plugin failed in `Compile / doc` ("undefined: new dataclass.data"). The
@@ -174,9 +208,11 @@ plugin's docs are disabled for now.
 - Phase 3 (part 1):
   - tests for sbt 1.x dependencies, several consumer Scala versions, git tags/commits/`HEAD`,
     `.subdir`, `.named`, `sourceDepsClean`;
-  - git without prompts; refuse to move a clone with local edits; no stack traces for user errors.
+  - git without prompts; refuse to move a clone with local edits; no stack traces for user errors;
+  - dependencies that use the plugin themselves (shared directory, cascading rebuilds, cycles); sbt
+    builds go through staging too.
 
-**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the eight scripted tests above (the sbt 1.x
+**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the ten scripted tests above (the sbt 1.x
 dependency with sbt 1.13.0).
 
 **Not verified yet**

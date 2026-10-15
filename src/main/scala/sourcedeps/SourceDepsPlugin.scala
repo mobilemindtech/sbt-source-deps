@@ -35,7 +35,9 @@ object SourceDepsPlugin extends AutoPlugin:
   }
 
   override def buildSettings: Seq[Setting[?]] = Seq(
-    sourceDepsDirectory := (LocalRootProject / baseDirectory).value / ".source-deps",
+    // a build launched by this plugin (as a dependency) shares the working directory of the outer build
+    sourceDepsDirectory := sys.props.get(Nested.DirProp).map(file)
+      .getOrElse((LocalRootProject / baseDirectory).value / ".source-deps"),
     sourceDepsCommands := Builders.defaultCommands,
     sourceDepsEnv := Map.empty
   )
@@ -61,7 +63,12 @@ object SourceDepsPlugin extends AutoPlugin:
     sourceDepsForcedVersions := Def.uncached(sourceDepsResolved.value.flatMap(_.published).distinct.map(moduleId)),
     sourceDepsResolved := Def.uncached {
       val e = engine.value(streams.value.log)
-      sourceDependencies.value.map(e.resolve(_))
+      val binary = scalaBinaryVersion.value
+      sourceDependencies.value.map { dep =>
+        val resolved = e.resolve(dep)
+        Nested.record(dep, binary)
+        resolved
+      }
     },
     sourceDepsUpdate := Def.uncached {
       val e = engine.value(streams.value.log)

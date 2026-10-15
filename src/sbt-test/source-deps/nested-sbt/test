@@ -1,0 +1,12 @@
+> writeMiddlePlugin
+
+# middle's own source dependency is built into the consumer's working directory
+> run middle+v1
+$ exists .source-deps/repo/example/middle_3
+$ exists .source-deps/repo/example/greeter_3
+$ absent middle/.source-deps
+> sourceDepsStatus
+
+# a change in greeter rebuilds middle, which picks the new greeter
+$ copy-file changes/Greeter.scala greeter/src/main/scala/Greeter.scala
+> run middle+v2

@@ -1,0 +1,4 @@
+> writePlugins
+# a -> b -> a: fails with a cycle error instead of waiting forever on a's lock
+-> compile
+$ absent .source-deps/repo/example

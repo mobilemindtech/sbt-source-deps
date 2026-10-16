@@ -93,6 +93,16 @@ These tasks are **uncached** (`Def.uncached`), so sbt 2's action cache never rep
 up-to-date check runs on every `update`. When nothing changed, its cost is hashing the dependencies'
 files.
 
+## `_checkouts`
+
+| Item | Description |
+| --- | --- |
+| `<build root>/_checkouts/<name>/` | An sbt 2 build (or a symlink to one) loaded with the consumer's build. See [usage](usage.md#editing-a-library-in-place-_checkouts). |
+| `-Dsbt.source-deps.checkouts=<dir>`, `SBT_SOURCE_DEPS_CHECKOUTS=<dir>` | Another directory, absolute or relative to the build root. |
+| Project `sourceDepsCheckouts` | Added to the build (hidden, `publish / skip`) when `_checkouts/` holds a build: it makes sbt load the checkout builds. |
+| `allowMismatchScala` | Set to `true` on projects that use a 2.13-only checkout project from Scala 3. |
+| `csrConfiguration` | Also forces the versions of the checkout projects' modules. |
+
 ## Directory layout
 
 ```

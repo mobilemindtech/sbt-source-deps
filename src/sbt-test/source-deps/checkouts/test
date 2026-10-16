@@ -1,0 +1,12 @@
+# the checkout replaces example:greeter, which is published nowhere. The checkout uses this plugin
+# too (its project/plugins.sbt), so its build also runs the plugin's load-time hooks
+> run v1
+
+# a reload keeps everything working (the Scala version is aligned again)
+> reload
+> run v1
+
+# an edit in the checkout is compiled incrementally on the next run: no publishing
+$ copy-file changes/Util.scala _checkouts/greeter/util/src/main/scala/greeter/Util.scala
+> run v1!
+-$ exists .source-deps

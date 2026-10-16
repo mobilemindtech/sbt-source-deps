@@ -28,6 +28,9 @@ don't, nothing is built.
 - **The source build always wins** over other versions of the same module brought in transitively.
 - **Scala cross-versions.** For sbt dependencies, the plugin picks the `crossScalaVersions` entry that
   matches your project's Scala version.
+- **`_checkouts` for sbt 2 libraries.** Put (or symlink) a library's build in `_checkouts/`: it
+  replaces the published module you declare, compiles incrementally with your project and shows up in
+  the IDE. Nothing is published, and `build.sbt` does not change.
 - **Safe for concurrent sessions.** sbt, Metals and other sessions can share the directory, because
   builds are serialized with a file lock.
 

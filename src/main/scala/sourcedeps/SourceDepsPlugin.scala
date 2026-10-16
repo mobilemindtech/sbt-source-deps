@@ -40,6 +40,16 @@ object SourceDepsPlugin extends AutoPlugin:
       )
   }
 
+  override def extraProjects: Seq[Project] = Checkouts.extra
+
+  override def globalSettings: Seq[Setting[?]] = Seq(
+    Checkouts.sourceDepsCheckoutProjects := Checkouts.projects.value,
+    Checkouts.sourceDepsCheckoutLinks := Checkouts.links.value,
+    buildDependencies := Checkouts.buildDependencies.value,
+    onLoad := onLoad.value.andThen(Checkouts.onLoad),
+    onUnload := onUnload.value.andThen(Checkouts.onUnload)
+  )
+
   override def buildSettings: Seq[Setting[?]] = Seq(
     sourceDepsShared := SharedCache.enabledByDefault,
     sourceDepsSharedDirectory := SharedCache.defaultDirectory,
@@ -55,6 +65,7 @@ object SourceDepsPlugin extends AutoPlugin:
 
   override def projectSettings: Seq[Setting[?]] = Seq(
     sourceDependencies := Nil,
+    allowMismatchScala := allowMismatchScala.value || Checkouts.mismatchAllowed.value,
     resolvers ++= {
       if sourceDependencies.value.isEmpty then Nil
       else Seq(MavenRepository("source-deps", (sourceDepsDirectory.value / "repo").toURI.toString))
@@ -62,8 +73,9 @@ object SourceDepsPlugin extends AutoPlugin:
     // uncached: the up-to-date check must run on every update, never be replayed from the action cache
     allDependencies := Def.uncached(allDependencies.value ++ sourceDepsResolve.value),
     // `1.0.0+src.x` ties with `1.0.0` and loses to `1.0.1`: force the source build over any transitive version
+    // _checkouts: the local module wins the same way, over versions declared or requested transitively
     csrConfiguration := Def.uncached {
-      val forced = sourceDepsForcedVersions.value.map { m =>
+      val forced = (sourceDepsForcedVersions.value ++ Checkouts.forcedModules.value).map { m =>
         import lmcoursier.definitions.{Module, ModuleName, Organization}
         (Module(Organization(m.organization), ModuleName(m.name), Map.empty), m.revision)
       }

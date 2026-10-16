@@ -163,6 +163,28 @@ The properties are ignored by builds that do not use the plugin. A dependency us
 of the plugin, or built with sbt 1.x (the plugin requires sbt 2), keeps its nested dependencies in
 its own `.source-deps`, and the outer build fails to resolve them.
 
+## `_checkouts`
+
+The checkout builds become part of the consumer's build, so sbt compiles them like its own projects.
+Three steps, because sbt only loads an external build when a project of the root build refers to it,
+and its project ids are unknown before loading:
+
+1. **While loading**, the plugin's `extraProjects` adds a hidden project, `sourceDepsCheckouts`, that
+   depends on the root project of each build in `_checkouts/`. sbt therefore loads those builds.
+   `extraProjects` is used rather than `derivedProjects`, which is not called for an implicit root
+   project. Its base directory is relative: a checkout that uses this plugin too gets its own
+   (harmless) hidden project, since the hook does not say which build it is called for.
+2. **After loading**, `Global / buildDependencies` (a setting) gets a classpath edge from each project
+   of the root build to every checkout project whose `projectID` (organization and name) it declares in
+   `libraryDependencies`. The versions of the checkout modules are forced in `csrConfiguration`, as for
+   source dependencies: otherwise coursier picks a higher published version requested directly or by
+   another library, and drops the local module's own dependencies (`dependencyOverrides` is not enough:
+   coursier still fetches the declared version).
+3. **`onLoad`** appends `scalaVersion` for the checkout projects whose consumers use one Scala binary
+   version, picked from their `crossScalaVersions`. Appended settings win over the checkout build's
+   own, project-level ones included. Appending unloads and loads again, so a state attribute (removed
+   by `onUnload`, for `reload`) keeps it from looping, and the summary is logged once.
+
 ## Forced versions
 
 After resolution, the plugin knows every module the source build published, not only those selected

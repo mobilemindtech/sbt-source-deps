@@ -12,12 +12,13 @@ setting, task and method.
 - [Several dependencies](#several-dependencies)
 - [Multi-project builds](#multi-project-builds)
 - [Dependencies that use sbt-source-deps too](#dependencies-that-use-sbt-source-deps-too)
+- [Editing a library in place (`_checkouts`)](#editing-a-library-in-place-_checkouts)
 - [Switching between a local checkout and git](#switching-between-a-local-checkout-and-git)
 - [Java libraries (Maven, Gradle)](#java-libraries-maven-gradle)
 - [Scala versions and cross-building](#scala-versions-and-cross-building)
 - [Overriding a library you already depend on](#overriding-a-library-you-already-depend-on)
 - [Custom tool commands and JDK](#custom-tool-commands-and-jdk)
-- [Where the files go](#where-the-files-go)
+- [The shared cache](#the-shared-cache)
 - [Continuous integration](#continuous-integration)
 - [IDEs (Metals, IntelliJ)](#ides-metals-intellij)
 - [Everyday commands](#everyday-commands)
@@ -240,6 +241,57 @@ Requirements:
 
 See [how it works](how-it-works.md#dependencies-that-use-the-plugin) for the details.
 
+## Editing a library in place (`_checkouts`)
+
+To change a library and test it from your project at once, without publishing it anywhere, put its
+sbt 2 build in `_checkouts/` at the root of your build, like rebar3's `_checkouts`. A symlink is the
+usual way:
+
+```
+app/
+├── build.sbt              libraryDependencies += "example" %% "greeter" % "1.4.0"   (unchanged)
+└── _checkouts/
+    └── greeter -> ~/src/greeter
+```
+
+```
+$ mkdir -p _checkouts && ln -s ~/src/greeter _checkouts/greeter
+sbt> reload
+[info] [source-deps] _checkouts: core (greeter, Scala 3.8.4) replaces its published module in app
+```
+
+- The library's build is loaded **together with yours**. Each project of yours that declares a module
+  produced by a checkout project (`example:greeter`, matched by organization and name) depends on that
+  project instead. The released version is not downloaded.
+- Edits in the checkout compile **incrementally** on your next `compile`/`run`/`test`, with errors
+  reported as usual. Nothing is published, and its classes go to your build's `target/`.
+- **IDEs** see the checkout projects as modules of the build (BSP targets for Metals, sbt import for
+  IntelliJ): navigation opens your working copy, and refactorings cross both.
+- The checkout's own dependencies come along, and its version wins over any version of the same
+  module that other libraries bring in.
+- **Scala version**: a checkout project compiles with your project's Scala version when its
+  `crossScalaVersions` has one with the same binary version (`3.8.4` for a `3.x` consumer); otherwise it
+  keeps its own. A 2.13-only project can be used from Scala 3.
+- To go back to the released version, remove the directory (or the symlink) and `reload`.
+
+Limits:
+
+- **sbt 2 builds only.** sbt 1 builds and other tools are skipped with a warning; use
+  [`SourceDep.local`](#local-directories) for them (built and published to the isolated repository).
+- A module reached **only transitively** (through another library) is replaced once you declare it in
+  `libraryDependencies` too.
+- A checkout project compiles with **one** Scala version: two projects of yours on different Scala
+  versions using the same checkout get a warning, and only one of them can compile against it.
+- The checkout's plugins are loaded with yours, and your auto plugins apply to its projects too.
+  Conflicting plugin versions between both builds may fail to load.
+- Once `_checkouts/` holds a build, sbt names your implicit root project `<directory>-root` (it does so
+  whenever a build has more than one project). Builds that declare their root project keep its name.
+- The directory can be changed with `-Dsbt.source-deps.checkouts=<dir>` or
+  `SBT_SOURCE_DEPS_CHECKOUTS=<dir>` (relative to the build root).
+
+`_checkouts` and `sourceDependencies` can be combined: use `_checkouts` for the libraries you are
+editing, and source dependencies for the rest.
+
 ## Switching between a local checkout and git
 
 A common workflow: use a released tag normally, and your local checkout while you work on both
@@ -438,6 +490,9 @@ steps:
 ```
 
 ## IDEs (Metals, IntelliJ)
+
+For a library you are editing, prefer [`_checkouts`](#editing-a-library-in-place-_checkouts): the IDE
+then works on your working copy. For source dependencies:
 
 Importing the build (BSP or the sbt import) runs `update`, which builds stale source dependencies.
 The first import can take a while, depending on the dependencies.

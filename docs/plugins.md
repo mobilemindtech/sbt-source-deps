@@ -10,6 +10,7 @@ A ready-to-run copy of the setup is in [`examples/scala-native`](../examples/sca
 - [What happens](#what-happens)
 - [Editing](#editing)
 - [How the meta-build uses the checkout](#how-the-meta-build-uses-the-checkout)
+- [Environment variables of the plugin's build (Scala Native's experimental compiler)](#environment-variables-of-the-plugins-build-scala-natives-experimental-compiler)
 - [Requirements and limits](#requirements-and-limits)
 - [Troubleshooting](#troubleshooting)
 
@@ -124,6 +125,43 @@ With `build`, the plugin's classes keep their name and version, and sbt 2's acti
 that they changed: tasks of the plugin such as `nativeLink` can be served from the cache, unchanged,
 after an edit of `tools`. With `published`, every edit gets a new version and the tasks run again.
 
+## Environment variables of the plugin's build (Scala Native's experimental compiler)
+
+Some builds change with an environment variable. Scala Native's `ENABLE_EXPERIMENTAL_COMPILER` adds a
+project per module for Scala's experimental compiler (`nativelib3_next`, `nscplugin3_next`, ...,
+with `ScalaVersions.scala3Nightly`, for example `3.10.0-RC1-bin-20260817-3adfcbd-NIGHTLY`). In Scala
+Native's own build you would run `ENABLE_EXPERIMENTAL_COMPILER=1 sbt sandbox/run`; with a checkout:
+
+1. **Start sbt with the variable**: the checkout is loaded by your sbt, which is the process whose
+   environment the plugin's build reads.
+
+   ```
+   ENABLE_EXPERIMENTAL_COMPILER=1 sbt run
+   ```
+
+   An `export` in your shell, or a tool such as direnv (`.envrc`), saves typing it. `.sbtopts` cannot
+   set environment variables.
+2. **Use that Scala version in your build**, so that the `_next` projects are the ones picked:
+
+   ```scala
+   // build.sbt
+   scalaVersion := "3.10.0-RC1-bin-20260817-3adfcbd-NIGHTLY" // ScalaVersions.scala3Nightly of the checkout
+   enablePlugins(ScalaNativePlugin)
+   ```
+
+   Several projects publish `nativelib` for Scala 3 (`nativelib3`, `nativelib3_next`): the one that
+   builds for your exact version wins. The startup log shows which:
+   `_checkouts: nativelib3_next (scala-native, Scala 3.10.0-RC1-...) replaces its published module`.
+
+The separate build of the meta-build inherits the variable but does not need it: the sbt plugin is
+built with sbt's Scala version (3.8.4) either way. To pass a variable only to the separate build (and
+rebuild it when the variable changes), use `sourceDepsEnv` in `project/plugins.sbt`:
+
+```scala
+// project/plugins.sbt
+sourceDepsEnv += "SOME_VARIABLE" -> "1"
+```
+
 ## Requirements and limits
 
 - **The plugin's build must run on sbt 2** and build the plugin for sbt 2 (Scala Native's does, with
@@ -137,6 +175,10 @@ after an edit of `tools`. With `published`, every edit gets a new version and th
 - The plugin's own plugins are loaded with yours (in `build` mode, and for the libraries in your build).
   Conflicting versions may fail to load.
 - sbt names your implicit root project `<directory>-root` once `_checkouts/` holds a build.
+- sbt 2 puts the classes of a checkout project in your `target/out/<platform>/scala-<version>/<name>`:
+  two projects of the checkout with the same name and Scala version would collide ("Overlapping output
+  directories"). Scala Native's builds keep them apart (`nativelib3`, `nativelib3_next` use different
+  versions).
 
 ## Troubleshooting
 

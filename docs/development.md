@@ -377,6 +377,19 @@ jar mode), plugin conflicts between builds, nested `_checkouts` ignored.
   `.platform("fake1")` like Scala Native's plugin does: the Ivy fallback (`csrExtraProjects`) then has
   the platform in its names. What differs in Scala Native's build is not isolated; no scripted test.
 
+### Scala Native's experimental compiler (2026-10-16)
+
+- `ENABLE_EXPERIMENTAL_COMPILER` is read by Scala Native's build (`MyScalaNativePlugin`), which then
+  adds `*3_next` projects on `ScalaVersions.scala3Nightly`. The checkout is loaded by the user's sbt, so
+  the variable goes on its command line; the consumer's `scalaVersion` selects the `_next` projects.
+- Selection bug: among candidates for one binary version, the order was "no change needed", then the
+  project id, so `nativelib3` (whose `crossScalaVersions` has a lower 3.x) won over
+  `nativelib3_next` (the exact version). Now the exact consumer version comes first. Test:
+  `checkouts-cross` (`lib3` on 3.8.3/3.9.0, `lib3next` with 3.8.4).
+- sbt 2 puts external projects' output under the consumer's `target/out/jvm/scala-<v>/<name>`: two
+  projects with one name and one Scala version fail with "Overlapping output directories" (the fixture
+  had both on 3.9.0 at first).
+
 ### sbt plugins from source: Scala Native (2026-10-16)
 
 Done with a copy of the maintainer's clone (sbt 2.0.9 build, uncommitted work untouched) and a minimal

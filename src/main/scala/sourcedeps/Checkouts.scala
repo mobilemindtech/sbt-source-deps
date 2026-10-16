@@ -191,9 +191,12 @@ private[sourcedeps] object Checkouts:
           (if notAbove.nonEmpty then notAbove else sameBinary).sortWith(compareVersions(_, _) > 0).headOption
       chosen
     def change(c: Candidate, v: String) = if v == c.scalaVersion then None else Some(v)
+    // a project building for the consumer's exact version first (Scala Native's `nativelib3_next` over
+    // `nativelib3` for an experimental compiler), then one already at its target, then by name
     def byBinary(wanted: String) =
-      candidates.flatMap(c => target(c, wanted).map(v => (c, change(c, v))))
-        .sortBy((c, ch) => (ch.isDefined, c.ref.project)).headOption
+      candidates.flatMap(c => target(c, wanted).map(v => (c, v)))
+        .sortBy((c, v) => (v != consumerScala, v != c.scalaVersion, c.ref.project))
+        .headOption.map((c, v) => (c, change(c, v)))
     dep.crossVersion match
       case _: sbt.librarymanagement.Full =>
         candidates.find(_.versions.contains(consumerScala)).map(c => (c, change(c, consumerScala)))

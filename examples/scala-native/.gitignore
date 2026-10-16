@@ -1,0 +1,7 @@
+_checkouts/
+target/
+project/target/
+project/project/target/
+project/.source-deps/
+.source-deps/
+.bsp/

@@ -29,13 +29,14 @@ final class Engine(
     commands: Map[BuildTool, Seq[String]],
     env: Map[String, String],
     scalaBinaryVersion: String,
+    scalaVersion: String,
     log: Logger,
     showOutput: Boolean = false
 ):
   val repo: File = new File(root, "repo")
 
   /** Bump to invalidate every previously published artifact (e.g. when builder flags change). */
-  private val formatVersion = "5"
+  private val formatVersion = "6"
 
   /**
    * Builds `dep` when stale; returns the selected modules and every module to force (the build's own
@@ -51,7 +52,7 @@ final class Engine(
       val tool = detect(dep, projectDir).getOrElse {
         throw ProcessFailed(s"could not detect the build tool of $dep in $projectDir (use .buildTool(...))")
       }
-      val variant = variantOf(tool, scalaBinaryVersion)
+      val variant = variantOf(tool, scalaVersion)
       val slot = slotOf(variant, dep, env)
       if fetch then fetchNested(home, slot, Set(dep.id))
       val own = ownFingerprint(dep, projectDir, tool, variant, env)
@@ -70,7 +71,7 @@ final class Engine(
           sbt.io.IO.delete(staging)
           staging.mkdirs()
           val req = BuildRequest(
-            projectDir, staging, home, scalaBinaryVersion, commands, env ++ dep.extraEnv, log, dep.id,
+            projectDir, staging, home, scalaBinaryVersion, scalaVersion, commands, env ++ dep.extraEnv, log, dep.id,
             NestedContext(root, nestedDir, chain :+ dep.id), dep.extraArgs, showOutput
           )
           val started = System.nanoTime()
@@ -106,7 +107,7 @@ final class Engine(
     val home = new File(root, dep.id)
     projectDir(dep, home).filter(_.isDirectory).map { dir =>
       detect(dep, dir).exists { tool =>
-        Poms.indexed(repo, versionSuffix(dep, dir, tool, scalaBinaryVersion, env, Set(dep.id))).nonEmpty
+        Poms.indexed(repo, versionSuffix(dep, dir, tool, scalaVersion, env, Set(dep.id))).nonEmpty
       }
     }
 
@@ -119,9 +120,12 @@ final class Engine(
 
   private def detect(dep: SourceDep, dir: File): Option[BuildTool] = dep.tool.orElse(Builders.detect(dir))
 
-  /** sbt builds pick the consumer's Scala version, so they get one variant per Scala binary version. */
-  private def variantOf(tool: BuildTool, scalaBinary: String): String =
-    if tool == BuildTool.Sbt then s"scala-$scalaBinary" else "default"
+  /**
+   * sbt builds pick the consumer's Scala version (the exact one when they build for it: Scala 3 reads
+   * TASTy only from versions up to its own), so they get one variant per Scala version.
+   */
+  private def variantOf(tool: BuildTool, scala: String): String =
+    if tool == BuildTool.Sbt then s"scala-$scala" else "default"
 
   /** The variant, plus a hash of the extra environment and arguments when there are any. */
   private def slotOf(variant: String, dep: SourceDep, baseEnv: Map[String, String]): String =
@@ -151,9 +155,9 @@ final class Engine(
     Nested.read(home, slot).map(r => s"nested=${r.dep.id}@${currentSuffix(r, visited).getOrElse("missing")}")
 
   private def versionSuffix(
-      dep: SourceDep, dir: File, tool: BuildTool, scalaBinary: String, env: Map[String, String], visited: Set[String]
+      dep: SourceDep, dir: File, tool: BuildTool, scala: String, env: Map[String, String], visited: Set[String]
   ): String =
-    val variant = variantOf(tool, scalaBinary)
+    val variant = variantOf(tool, scala)
     suffixOf(ownFingerprint(dep, dir, tool, variant, env), nestedLines(new File(root, dep.id), slotOf(variant, dep, env), visited))
 
   /** The suffix a nested dependency would be published with now; None when it is not checked out. */
@@ -163,7 +167,7 @@ final class Engine(
       for
         dir <- projectDir(r.dep, new File(root, r.dep.id)).filter(_.isDirectory)
         tool <- detect(r.dep, dir)
-      yield versionSuffix(r.dep, dir, tool, r.scalaBinaryVersion, r.env, visited + r.dep.id)
+      yield versionSuffix(r.dep, dir, tool, r.scalaVersion, r.env, visited + r.dep.id)
 
   /** Every module currently published by the nested dependencies of `home`, recursively. */
   private def nestedPublished(home: File, slot: String, visited: Set[String]): Seq[Coordinates] =
@@ -191,7 +195,7 @@ final class Engine(
 
   /** The slot a nested build used for its dependency: computed with that build's own `sourceDepsEnv`. */
   private def nestedSlot(tool: BuildTool, r: Nested.Record): String =
-    slotOf(variantOf(tool, r.scalaBinaryVersion), r.dep, r.env)
+    slotOf(variantOf(tool, r.scalaVersion), r.dep, r.env)
 
   private def projectDir(dep: SourceDep, home: File): Option[File] =
     val base = dep.location match

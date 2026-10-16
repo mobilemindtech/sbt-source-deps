@@ -12,6 +12,7 @@ final case class BuildRequest(
     staging: File,
     workDir: File,
     scalaBinaryVersion: String,
+    scalaVersion: String,
     commands: Map[BuildTool, Seq[String]],
     env: Map[String, String],
     log: Logger,
@@ -125,7 +126,7 @@ object SbtBuilder extends Builder:
       .foreach(f => sbt.io.IO.copyFile(f, new File(dir, f.getName)))
     sbt.io.IO.write(
       new File(dir, "zz-source-deps.sbt"),
-      overrides(Builders.fileUri(req.staging), req.scalaBinaryVersion)
+      overrides(Builders.fileUri(req.staging), req.scalaBinaryVersion, req.scalaVersion)
     )
     dir
 
@@ -147,7 +148,15 @@ object SbtBuilder extends Builder:
    * project switches to the entry of its `crossScalaVersions` matching the consumer's Scala binary
    * version, when there is one.
    */
-  private def overrides(repoUri: String, scalaBinary: String): String =
+  /**
+   * Appended once loaded (see [[prepareGlobalSettings]]):
+   *   - every project builds with the consumer's Scala version when it can: the exact one, else the
+   *     highest of its binary version not above it, else its own;
+   *   - when `-Dsbt.source-deps.wanted=org:name,...` is given (sbt checkouts, see [[Checkouts]]), only
+   *     the projects producing those modules for that Scala version, and the projects they depend on,
+   *     are published: Scala Native's build has 113 projects, its sbt plugin needs about ten.
+   */
+  private def overrides(repoUri: String, scalaBinary: String, scalaFull: String): String =
     s"""val sourceDepsStagingApplied = settingKey[Boolean]("set by sbt-source-deps once its overrides are applied")
        |
        |Global / onLoad := {
@@ -159,18 +168,41 @@ object SbtBuilder extends Builder:
        |    if (refs.forall(ref => extracted.getOpt(ref / sourceDepsStagingApplied).contains(true))) state
        |    else {
        |      def binary(v: String) = sbt.librarymanagement.CrossVersion.binaryScalaVersion(v)
-       |      val settings = refs.flatMap { ref =>
+       |      // runs on sbt 1 (Scala 2.12) too
+       |      def parts(v: String): Seq[Int] = v.takeWhile(_ != '-').split('.').toSeq.map(p => scala.util.Try(p.toInt).getOrElse(0))
+       |      def compare(a: String, b: String): Int = parts(a).zipAll(parts(b), 0, 0).map { case (x, y) => x compare y }.find(_ != 0).getOrElse(0)
+       |      def notAbove(v: String) = compare(v, "$scalaFull") <= 0
+       |      def scalaOf(ref: ProjectRef): String = {
        |        val current = extracted.get(ref / scalaVersion)
-       |        val scala =
-       |          if (binary(current) == "$scalaBinary") current
-       |          else extracted.get(ref / crossScalaVersions).find(v => binary(v) == "$scalaBinary").getOrElse(current)
+       |        val versions = (extracted.get(ref / crossScalaVersions) :+ current).distinct.filter(v => binary(v) == "$scalaBinary")
+       |        if (versions.contains("$scalaFull")) "$scalaFull"
+       |        else {
+       |          val below = versions.filter(notAbove)
+       |          if (below.nonEmpty) below.sortWith((a, b) => compare(a, b) > 0).head
+       |          else if (binary(current) == "$scalaBinary") current
+       |          else versions.headOption.getOrElse(current)
+       |        }
+       |      }
+       |      val wanted = sys.props.get("${Checkouts.WantedProp}").toSeq.flatMap(_.split(',')).filter(_.nonEmpty).toSet
+       |      val published: ProjectRef => Boolean =
+       |        if (wanted.isEmpty) _ => true
+       |        else {
+       |          val chosen = refs.filter { ref =>
+       |            val id = extracted.get(ref / projectID)
+       |            wanted(id.organization + ":" + id.name) && binary(scalaOf(ref)) == "$scalaBinary"
+       |          }
+       |          val deps = extracted.get(Global / buildDependencies)
+       |          val closure = (chosen ++ chosen.flatMap(deps.classpathTransitiveRefs)).toSet
+       |          closure
+       |        }
+       |      val settings = refs.flatMap { ref =>
        |        Seq(
-       |          ref / scalaVersion := scala,
+       |          ref / scalaVersion := scalaOf(ref),
        |          ref / sourceDepsStagingApplied := true,
        |          ref / publishTo := Some("source-deps-staging" at "$repoUri"),
        |          ref / publishMavenStyle := true,
        |          ref / Compile / packageDoc / publishArtifact := false
-       |        )
+       |        ) ++ (if (published(ref)) Nil else Seq(ref / publish / skip := true))
        |      }
        |      extracted.appendWithSession(settings, state)
        |    }

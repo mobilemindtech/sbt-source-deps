@@ -291,7 +291,9 @@ Directories without a recognized build are skipped with a warning.
 Limits (sbt 2 checkouts):
 
 - A module reached **only transitively** (through another library) is replaced once you declare it in
-  `libraryDependencies` too.
+  `libraryDependencies` too. Until then, `update` warns:
+  `_checkouts: app gets the published example:greeter-extras_3 (through another library), not extras
+  from greeter: add "example" %% "greeter-extras" to libraryDependencies to use the checkout`.
 - A checkout project compiles with **one** Scala version: two projects of yours on different Scala
   versions using the same checkout get a warning, and only one of them can compile against it.
 - The checkout's plugins are loaded with yours, and your auto plugins apply to its projects too.
@@ -309,53 +311,10 @@ editing, and source dependencies for the rest.
 
 ## sbt plugins from source (Scala Native)
 
-`_checkouts` also works for **sbt plugins**: the meta-build (`project/`) is an sbt build too. Add
-sbt-source-deps to the meta-build's own plugins, and to your build's:
-
-```
-app/
-├── project/project/plugins.sbt   addSbtPlugin("br.com.mobilemind" % "sbt-source-deps" % "<version>")
-├── project/plugins.sbt           addSbtPlugin("org.scala-native" % "sbt-scala-native" % "0.5.13-SNAPSHOT")
-│                                 addSbtPlugin("br.com.mobilemind" % "sbt-source-deps" % "<version>")
-├── build.sbt                     enablePlugins(ScalaNativePlugin)
-└── _checkouts/
-    └── scala-native -> ~/src/scala-native
-```
-
-One checkout serves both levels:
-
-- in the meta-build, `sbtScalaNative3` replaces the declared plugin (with `tools`, `nir`, `util`, ...
-  compiled from source);
-- in your build, the libraries the plugin adds (`nativelib`, `javalib`, `scala3lib`, ...) come from
-  `nativelib3`, `javalib3`, ..., and the compiler plugin `nscplugin` from `nscplugin3`.
-
-```
-[info] [source-deps] _checkouts: sbtScalaNative3 (scala-native, Scala 3.8.4) replaces its published module in app-build
-[info] [source-deps] _checkouts: nativelib3 (scala-native, Scala 3.8.4) replaces its published module in app-root
-[info] [source-deps] _checkouts: nscplugin3 (scala-native, Scala 3.8.4) replaces its published compiler plugin in app-root
-```
-
-Editing:
-
-| You change | Picked up |
-| --- | --- |
-| a library (`nativelib`, `javalib`, ...) | next `compile`/`run`, incrementally |
-| the compiler plugin (`nscplugin`) | next `compile`/`run`: the plugin is rebuilt and your code recompiled with it |
-| the sbt plugin or what it runs (`sbt-scala-native`, `tools`, `nir`) | after `reload` (the meta-build is compiled while loading) |
-
-Notes:
-
-- **The plugin's build must run on sbt 2** (Scala Native's does) and build the plugin for sbt 2.
-  Builds with one project per Scala version (`nir2_12`, `nir2_13`, `nir3`) are fine: the project
-  matching what you declare is picked, and its Scala version aligned with yours.
-- **Memory**: such a build is loaded twice (meta-build and build), Scala Native's with about 145,000
-  settings each. Give sbt more heap, for example in `.sbtopts`: `-J-Xmx6G` (Scala Native itself asks for
-  5 GB).
-- **The first build compiles everything you use from source**, the Scala standard library for Native
-  included (several minutes); later builds are incremental.
-- The declared versions do not matter (`0.5.13-SNAPSHOT` above is published nowhere): the checkout
-  replaces them. Remove the symlink and `reload` to go back to the released plugin, with a released
-  version in `project/plugins.sbt`.
+`_checkouts` also works for **sbt plugins**, through the meta-build (`project/`): the plugin, its
+libraries and a compiler plugin can all come from one checkout. See
+[sbt plugins from source](plugins.md), with Scala Native as the example
+([`examples/scala-native`](../examples/scala-native)).
 
 ## Switching between a local checkout and git
 

@@ -11,11 +11,24 @@ private[sourcedeps] object Hashing:
 
   def hex(bytes: Array[Byte]): String = bytes.map(b => f"${b & 0xff}%02x").mkString
 
-  /** Directories that hold build output or tool state and never affect the result. */
+  /** Directories of tool state, ignored wherever they are. */
   val ignoredDirs: Set[String] = Set(
-    ".git", "target", "build", "out", ".bsp", ".bloop", ".metals", ".idea", ".vscode",
-    ".gradle", ".mill", ".scala-build", ".source-deps", "node_modules"
+    ".git", ".bsp", ".bloop", ".metals", ".idea", ".vscode", ".gradle", ".mill", ".scala-build", ".source-deps",
+    "node_modules"
   )
+
+  /**
+   * Build output directories (sbt/Maven `target`, Gradle `build`, Mill `out`), ignored outside source
+   * directories only: under `src/` they are packages (`scala.scalanative.build`), whose files must count.
+   */
+  val outputDirs: Set[String] = Set("target", "build", "out")
+
+  /** Whether the directories of `rel` (a relative path, `/`-separated) make it build output or tool state. */
+  private[sourcedeps] def isIgnoredDir(dirs: Seq[String]): Boolean =
+    dirs.exists(ignoredDirs) || {
+      val beforeSrc = dirs.takeWhile(_ != "src")
+      beforeSrc.exists(outputDirs)
+    }
 
   /**
    * Content hash of the source tree rooted at `root`: relative paths plus the SHA-256 of each file.
@@ -46,7 +59,7 @@ private[sourcedeps] object Hashing:
   def listFiles(root: File): Seq[String] =
     Git.listFiles(root).getOrElse(walk(root)).filterNot(isIgnored).sorted
 
-  private def isIgnored(rel: String): Boolean = rel.split('/').dropRight(1).exists(ignoredDirs)
+  private def isIgnored(rel: String): Boolean = isIgnoredDir(rel.split('/').toSeq.dropRight(1))
 
   private def walk(root: File): Seq[String] =
     import java.nio.file.{FileVisitResult, Path, SimpleFileVisitor}
@@ -57,7 +70,8 @@ private[sourcedeps] object Hashing:
       base,
       new SimpleFileVisitor[Path]:
         override def preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult =
-          if dir != base && ignoredDirs(dir.getFileName.toString) then FileVisitResult.SKIP_SUBTREE
+          val rel = base.relativize(dir).toString.replace(File.separatorChar, '/')
+          if dir != base && isIgnoredDir(rel.split('/').toSeq) then FileVisitResult.SKIP_SUBTREE
           else FileVisitResult.CONTINUE
         override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult =
           if attrs.isRegularFile then out += base.relativize(file).toString.replace(File.separatorChar, '/')

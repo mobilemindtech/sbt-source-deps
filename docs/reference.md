@@ -94,6 +94,7 @@ Wherever a forced module appears in the dependency graph, it resolves to the sou
 | `allDependencies` | Without the declarations a checkout replaces. |
 | `excludeDependencies` | The declared modules whose artifact name differs from the checkout project's. |
 | `scalacOptions` | `-Xplugin:<jar>` for the compiler plugins a checkout replaces. |
+| `update` | Warns about published modules that an unused checkout project builds (reached through another library). |
 | `csrInterProjectDependencies` | The coursier projects of the checkout projects (platform suffixes). |
 | `Global / buildDependencies` | Adds the edges from your projects to the sbt 2 checkout projects. |
 | `Global / onLoad`, `Global / onUnload` | Align the Scala version of the checkout projects; log the checkouts in use. |
@@ -109,6 +110,7 @@ files.
 | --- | --- |
 | `<build root>/_checkouts/<name>/` | A build (or a symlink to one). sbt 2 builds are loaded with the consumer's build; others are built like `SourceDep.local` and their modules forced. See [usage](usage.md#editing-a-library-in-place-_checkouts). |
 | `-Dsbt.source-deps.checkouts=<dir>`, `SBT_SOURCE_DEPS_CHECKOUTS=<dir>` | Another directory, absolute or relative to the build root. |
+| `-Dsbt.source-deps.checkouts.meta=build`, `SBT_SOURCE_DEPS_CHECKOUTS_META=build` | Load sbt 2 checkouts into the meta-build too, instead of building them apart (`published`, the default). See [plugins](plugins.md#how-the-meta-build-uses-the-checkout). |
 | Project `sourceDepsCheckouts` | Added to the build (hidden, `publish / skip`) when `_checkouts/` holds a build: it makes sbt load the checkout builds. |
 | `allowMismatchScala` | Set to `true` on projects that use a 2.13-only checkout project from Scala 3. |
 | `csrConfiguration` | Also forces the versions of the checkout projects' modules. |

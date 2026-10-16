@@ -333,6 +333,41 @@ jar mode), plugin conflicts between builds, nested `_checkouts` ignored.
   4. **Cost**: the main build compiles `javalib` and `scalalib` (the Scala standard library for Native)
      from source once; later runs are incremental.
 
+### Loading the plugin's build once; fingerprint of `build` packages (2026-10-16)
+
+- **Cost of loading twice**, measured with Scala Native: alone 36 s / 2.7 GB; meta-build + build both
+  loading it 57 s / 5 GB. The meta-build now builds sbt 2 checkouts apart by default (jar mode, only
+  when they change): 39 s / 3 GB per start. `-Dsbt.source-deps.checkouts.meta=build` keeps the old way.
+- `extraProjects` is called for every build unit with no hint of which; a meta-build is loaded from
+  within its build's `Load.loadUnit`, so the plugin counts those frames (2 for a meta-build, 1 for a
+  build or a checkout's build; checked with sbt 2.0.10). `isMetaBuild` gives the same answer in settings.
+- **Only the needed projects**: `-Dsbt.source-deps.wanted=org:name,...` (the declared modules of the
+  consumer project) makes the injected settings set `publish / skip` on every project except those
+  producing these modules for the consumer's Scala version and the projects they depend on: 5 modules
+  out of 113 projects for Scala Native.
+- **Exact Scala version in jar mode too**: `tools3` builds with 3.9.0 by default and the meta-build runs
+  on 3.8.4. The variant of sbt dependencies is now the full Scala version (`scala-3.8.4`, also in nested
+  records); format version 6. The injected settings compile on sbt 1 (Scala 2.12): no `toIntOption`,
+  no `Ordering.Implicits.seqOrdering` (`sbt1-cross` caught it).
+- **Bug: edits in `scala/scalanative/build/` were invisible.** The fingerprint skipped every path
+  containing a directory named `target`, `build` or `out` (meant for build output), so a package named
+  `build` was never hashed and its edits never rebuilt anything, in any mode. Those names are now
+  skipped outside `src/` only. Test: `checkouts` edits `jgreeter/build/Suffix.java`.
+- The meta-build reuses a cached `update` when nothing else changed, so the checkouts' up-to-date check
+  also runs from `sourceDepsResolve` (part of the uncached `allDependencies`).
+- With `meta=build`, sbt 2's action cache served `nativeLink` unchanged after a `tools` edit (the
+  plugin's classes keep their name and version); in jar mode every edit is a new version.
+- **Memory**: in jar mode a rebuild runs a second sbt next to the user's (Scala Native's `.sbtopts` asks
+  5 GB, the example 6 GB); the first run of `examples/scala-native` was killed for low memory on this
+  21 GB machine with other programs open. Documented, with `sourceDepsCommands` to lower the separate
+  build's heap (command-line `-J-Xmx` comes after `.sbtopts` in the sbt runner and wins).
+- **Forced modules** of a used checkout were all its projects' modules, including projects not on the
+  consumer's classpath, whose forced version exists nowhere: now only the classpath closure, with the
+  platform in the name (`nativelib_native0.5_3`). The others are reported by a warning after `update`
+  (checked by hand with a fake published library depending on an unused checkout project).
+- A fake `platform := "fake1"` (with an inter-project dependency) did not reproduce the platform failure
+  seen with Scala Native: no scripted test for it yet.
+
 ### sbt plugins from source: Scala Native (2026-10-16)
 
 Done with a copy of the maintainer's clone (sbt 2.0.9 build, uncommitted work untouched) and a minimal
@@ -452,7 +487,9 @@ contains the real Scaladoc, so no empty jar is needed for Maven Central.
 - Roadmap item 4: per-file hash cache (`file-hashes.tsv`), format version 4.
 - Roadmap items 2–3: build duration logged; `sourceDepsShowOutput`; `.args`, `.env`, `.javaHome` per
   dependency (in the fingerprint and in nested records).
-- Roadmap item 4: sbt plugins from source through `_checkouts` (meta-build), checked with Scala Native.
+- Roadmap item 4: sbt plugins from source through `_checkouts` (meta-build), checked with Scala Native;
+  the meta-build builds them apart (jar mode, wanted projects only); `docs/plugins.md` and
+  `examples/scala-native`.
 - Roadmap item 3 (part 2): `_checkouts` mode: sbt 2 builds loaded with the consumer's build, other
   builds built like `SourceDep.local` with their modules forced.
 - Roadmap item 3 (part 1): shared cache, on by default (`sourceDepsShared`), with per-slot state,
@@ -479,8 +516,11 @@ Next steps, roughly in priority order:
    key (or `sbt-ci-release`), CI (GitHub Actions running `scripted`; needs Mill, Gradle, Maven and
    scala-cli), release to Maven Central.
 3. **`_checkouts` follow-ups** (the mode itself is done and approved: option 1, both mechanisms):
-   - modules reached only transitively, without declaring them;
+   - modules reached only transitively are reported (warning), not replaced automatically;
    - check the IntelliJ import by hand (BSP targets were checked with `bspWorkspaceBuildTargets`).
 4. **sbt plugins from source**: done through `_checkouts` (see "sbt plugins from source: Scala
-   Native"). Follow-ups: a scripted test for platform suffixes (checked by hand with Scala Native
-   only); a smaller meta-build footprint (the plugin's build is loaded in full twice).
+   Native" and "Loading the plugin's build once"). Follow-ups: a scripted test for platform suffixes
+   (checked by hand with Scala Native only; a fake platform does not reproduce it); verify
+   `examples/scala-native` end to end on a machine with enough free memory; the separate build reloads
+   all settings once to apply its overrides (`appendWithSession`); its share of the ~1 min 50 s is
+   not measured yet.

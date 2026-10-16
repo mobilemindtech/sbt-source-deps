@@ -42,6 +42,7 @@ don't, nothing is built.
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Installation and a first source dependency, step by step |
 | [Usage and examples](docs/usage.md) | Recipes for git, local directories, monorepos, multi-project builds, CI, ... |
+| [sbt plugins from source](docs/plugins.md) | A local or patched sbt plugin and its libraries, with Scala Native as the example ([`examples/scala-native`](examples/scala-native)) |
 | [Reference](docs/reference.md) | Every setting, task and `SourceDep` method; directory layout |
 | [Build tools](docs/build-tools.md) | What each supported tool needs, and how it is invoked |
 | [How it works](docs/how-it-works.md) | Fingerprints, versioning, POM rewriting, forced versions, locking |

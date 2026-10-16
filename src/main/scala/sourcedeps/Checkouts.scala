@@ -24,6 +24,17 @@ import sbt.librarymanagement.CrossVersion
 private[sourcedeps] object Checkouts:
   val DirProp = "sbt.source-deps.checkouts"
   val DirEnv = "SBT_SOURCE_DEPS_CHECKOUTS"
+
+  /**
+   * How the meta-build uses sbt 2 checkouts: `published` (default: built apart, only when they change)
+   * or `build` (loaded into the meta-build like in the build: no separate sbt per plugin edit, but the
+   * checkout's build is loaded twice on every start).
+   */
+  val MetaModeProp = "sbt.source-deps.checkouts.meta"
+  val MetaModeEnv = "SBT_SOURCE_DEPS_CHECKOUTS_META"
+
+  def metaInBuild: Boolean =
+    sys.props.get(MetaModeProp).orElse(sys.env.get(MetaModeEnv)).map(_.trim.toLowerCase).contains("build")
   val HiddenId = "sourceDepsCheckouts"
 
   /**
@@ -71,9 +82,34 @@ private[sourcedeps] object Checkouts:
 
   def builds(buildRoot: File): Seq[File] = entries(buildRoot).collect { case Entry.Build(dir) => dir }
 
-  /** Checkouts that sbt 2 cannot load, as source dependencies built with their own tool. */
-  def published(buildRoot: File): Seq[SourceDep] =
-    entries(buildRoot).collect { case Entry.Published(dir, tool) => SourceDep.local(dir).buildTool(tool) }
+  /**
+   * Checkouts built with their own tool, as source dependencies: those sbt 2 cannot load and, for the
+   * meta-build (`metaBuild`), every one. Loading an sbt plugin's build into the meta-build too would load
+   * it twice per sbt start (Scala Native: about 25 s and 2.5 GB more); built apart, it costs a
+   * fingerprint check until its sources change.
+   */
+  def published(buildRoot: File, metaBuild: Boolean): Seq[SourceDep] =
+    entries(buildRoot).collect {
+      case Entry.Published(dir, tool)   => SourceDep.local(dir).buildTool(tool)
+      case Entry.Build(dir) if metaBuild && !metaInBuild => SourceDep.local(dir).buildTool(BuildTool.Sbt)
+    }
+
+  /**
+   * Whether `extraProjects` is being called for a meta-build. sbt calls it from `Load.loadUnit` for every
+   * build unit without saying which; a meta-build (`project/`) is loaded from within its build's
+   * `loadUnit`, so two of those frames are on the stack (checked with sbt 2.0.10).
+   */
+  private[sourcedeps] def loadingMetaBuild: Boolean =
+    java.lang.StackWalker.getInstance().walk { frames =>
+      frames.filter(f => f.getMethodName == "loadUnit" && f.getClassName.startsWith("sbt.internal.Load")).count()
+    } > 1
+
+  /** Property naming the modules a build of an sbt checkout must publish (see [[SbtBuilder]]). */
+  val WantedProp = "sbt.source-deps.wanted"
+
+  /** Only what the consumer declares, and what it depends on, is published from an sbt checkout. */
+  def wantedArg(declared: Seq[ModuleID]): String =
+    s"-D$WantedProp=" + declared.map(m => s"${m.organization}:${m.name}").distinct.sorted.mkString(",")
 
   private def sbtVersion(dir: File): Option[String] =
     val f = new File(dir, "project/build.properties")
@@ -94,7 +130,7 @@ private[sourcedeps] object Checkouts:
   def extra: Seq[Project] =
     val root = new File(sys.props("user.dir")).getCanonicalFile
     val found = builds(root)
-    if found.isEmpty then Nil
+    if found.isEmpty || (loadingMetaBuild && !metaInBuild) then Nil
     else
       Seq(
         Project(HiddenId, file("target/source-deps-checkouts"))
@@ -279,18 +315,59 @@ private[sourcedeps] object Checkouts:
   }
 
   /**
-   * Modules of every project of the checkout builds a consumer uses, at the checkout's version and with
-   * the checkout's Scala suffix (a 2.13 project used from Scala 3 is `_2.13`).
+   * Checkout projects this project does not use: if resolution still brings their published module
+   * (another library depends on it), the published jar is used, not the checkout. See [[warnUnlinked]].
+   */
+  val unlinkedProjects: Def.Initialize[Seq[(ProjectRef, String, String)]] = Def.settingDyn {
+    val me = thisProjectRef.value
+    val (own, external) = projects.value
+    // only the consumer's projects: a checkout project's own dependencies are its build's business
+    val used = onClasspath(me, (Global / Keys.buildDependencies).value)
+    if !own.contains(me) then Def.setting(Nil)
+    else external.filterNot(used).map(r => (r / projectID).apply(m => (r, m.organization, m.name))).join
+  }
+
+  /** The checkout projects on a consumer's classpath: those it links, and the projects they depend on. */
+  private def onClasspath(me: ProjectRef, deps: sbt.internal.BuildDependencies): Set[ProjectRef] =
+    deps.classpathTransitiveRefs(me).filter(_.build != me.build).toSet
+
+  /** `name`, `name_3`, `name_2.13`, `name_native0.5_3`, `name_sjs1_3`, `name_sbt2_3`, `name_3.8.4`, ... */
+  private def isArtifactOf(artifact: String, name: String): Boolean =
+    artifact == name || artifact.startsWith(name + "_") &&
+      artifact.drop(name.length).matches("(_(native|sjs|sbt)[0-9.]+)?(_[0-9][0-9.]*(-[A-Za-z0-9.]+)?)?")
+
+  /**
+   * A module reached only transitively is not replaced (only declared ones are): say how to replace it.
+   * Published checkouts (other tools) need nothing, their versions are forced wherever they appear.
+   */
+  def warnUnlinked(report: UpdateReport, unlinked: Seq[(ProjectRef, String, String)], project: String, log: Logger): Unit =
+    if unlinked.nonEmpty then
+      val resolved = report.allModules.map(m => (m.organization, m.name)).distinct
+      for
+        (org, artifact) <- resolved
+        (ref, o, name) <- unlinked.find((_, o, n) => o == org && isArtifactOf(artifact, n)).toSeq
+      do
+        log.warn(
+          s"[source-deps] _checkouts: $project gets the published $org:$artifact (through another library), not " +
+            s"${ref.project} from ${new File(ref.build).getName}: add \"$o\" %% \"$name\" to libraryDependencies to use the checkout"
+        )
+
+  /**
+   * Modules of the checkout projects on a consumer's classpath, at the checkout's version and with the
+   * checkout's Scala suffix (a 2.13 project used from Scala 3 is `_2.13`): wherever another library asks
+   * for them, the local module wins. Only those: other projects of the checkout are published nowhere at
+   * that version (see [[warnUnlinked]]).
    */
   val forcedModules: Def.Initialize[Seq[ModuleID]] = Def.settingDyn {
     val me = thisProjectRef.value
-    val (_, external) = projects.value
-    val usedBuilds = links.value.filter(_.consumer == me).map(_.checkout.build).toSet
-    external.filter(r => usedBuilds(r.build)).map { r =>
+    val used = onClasspath(me, (Global / Keys.buildDependencies).value)
+    used.toSeq.sortBy(_.project).map { r =>
       Def.setting {
         val m = (r / projectID).value
+        // sbt 2 puts the platform between the name and the Scala suffix: nativelib_native0.5_3
+        val platformPart = (r / platform).?.value.filter(p => p != "jvm" && m.crossVersion != CrossVersion.disabled).fold("")("_" + _)
         val name = CrossVersion(m.crossVersion, (r / scalaVersion).value, (r / scalaBinaryVersion).value)
-          .fold(m.name)(_(m.name))
+          .fold(m.name)(_(m.name + platformPart))
         ModuleID(m.organization, name, m.revision)
       }
     }.join

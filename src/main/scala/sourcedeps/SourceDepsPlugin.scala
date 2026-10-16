@@ -37,7 +37,9 @@ object SourceDepsPlugin extends AutoPlugin:
   /** Source dependencies and published checkouts (the hidden project of the _checkouts mode has none). */
   private def allSourceDeps = Def.setting {
     val checkouts = if Checkouts.sourceDepsCheckoutsHidden.?.value.contains(true) then Nil else sourceDepsCheckoutDeps.value
-    sourceDependencies.value ++ checkouts
+    // an sbt checkout publishes the projects this project declares (and their dependencies), not all
+    val wanted = Checkouts.wantedArg(libraryDependencies.value)
+    sourceDependencies.value ++ checkouts.map(d => if d.tool.contains(BuildTool.Sbt) then d.args(wanted) else d)
   }
 
   private def moduleId(c: Coordinates): ModuleID = ModuleID(c.groupId, c.artifactId, c.version)
@@ -45,7 +47,8 @@ object SourceDepsPlugin extends AutoPlugin:
   private def engine = Def.setting {
     (log: Logger) =>
       Engine(
-        sourceDepsDirectory.value, sourceDepsCommands.value, sourceDepsEnv.value, scalaBinaryVersion.value, log,
+        sourceDepsDirectory.value, sourceDepsCommands.value, sourceDepsEnv.value, scalaBinaryVersion.value,
+        scalaVersion.value, log,
         sourceDepsShowOutput.value
       )
   }
@@ -71,7 +74,12 @@ object SourceDepsPlugin extends AutoPlugin:
     sourceDepsCommands := Builders.defaultCommands,
     sourceDepsEnv := Map.empty,
     sourceDepsShowOutput := false,
-    sourceDepsCheckoutDeps := Checkouts.published((LocalRootProject / baseDirectory).value)
+    // a meta-build (project/) uses the checkouts of the build it belongs to
+    sourceDepsCheckoutDeps := {
+      val base = (LocalRootProject / baseDirectory).value
+      val meta = (LocalRootProject / isMetaBuild).value
+      Checkouts.published(if meta then base.getParentFile else base, meta)
+    }
   )
 
   override def projectSettings: Seq[Setting[?]] = Seq(
@@ -90,6 +98,11 @@ object SourceDepsPlugin extends AutoPlugin:
     excludeDependencies ++= Checkouts.exclusions.value,
     csrInterProjectDependencies := Def.uncached(csrInterProjectDependencies.value ++ Checkouts.interProjects.value),
     scalacOptions ++= Checkouts.compilerPluginOptions.value,
+    update := Def.uncached {
+      val report = update.value
+      Checkouts.warnUnlinked(report, Checkouts.unlinkedProjects.value, thisProject.value.id, streams.value.log)
+      report
+    },
     // `1.0.0+src.x` ties with `1.0.0` and loses to `1.0.1`: force the source build over any transitive version
     // _checkouts: the local module wins the same way, over versions declared or requested transitively
     csrConfiguration := Def.uncached {
@@ -100,7 +113,12 @@ object SourceDepsPlugin extends AutoPlugin:
       val conf = csrConfiguration.value
       conf.withForceVersions(conf.forceVersions ++ forced)
     },
-    sourceDepsResolve := Def.uncached(sourceDepsResolved.value.flatMap(_.selected).map(moduleId)),
+    // published checkouts add no module, but their up-to-date check must run wherever the dependencies
+    // are computed: a meta-build reuses its cached `update` when nothing else changed
+    sourceDepsResolve := Def.uncached {
+      sourceDepsCheckoutResolved.value
+      sourceDepsResolved.value.flatMap(_.selected).map(moduleId)
+    },
     // published checkouts are not added as dependencies: forcing their modules replaces the declared ones
     sourceDepsForcedVersions := Def.uncached(
       (sourceDepsResolved.value ++ sourceDepsCheckoutResolved.value).flatMap(_.published).distinct.map(moduleId)
@@ -108,21 +126,23 @@ object SourceDepsPlugin extends AutoPlugin:
     sourceDepsCheckoutResolved := Def.uncached {
       val e = engine.value(streams.value.log)
       val binary = scalaBinaryVersion.value
+      val full = scalaVersion.value
       val depsEnv = sourceDepsEnv.value
       val checkouts = allSourceDeps.value.drop(sourceDependencies.value.size)
       checkouts.map { dep =>
         val resolved = e.resolve(dep)
-        Nested.record(dep, binary, depsEnv)
+        Nested.record(dep, binary, full, depsEnv)
         resolved
       }
     },
     sourceDepsResolved := Def.uncached {
       val e = engine.value(streams.value.log)
       val binary = scalaBinaryVersion.value
+      val full = scalaVersion.value
       val depsEnv = sourceDepsEnv.value
       sourceDependencies.value.map { dep =>
         val resolved = e.resolve(dep)
-        Nested.record(dep, binary, depsEnv)
+        Nested.record(dep, binary, full, depsEnv)
         resolved
       }
     },

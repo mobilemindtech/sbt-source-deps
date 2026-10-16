@@ -23,14 +23,14 @@ private[sourcedeps] object Nested:
   val MaxDepth = 16
 
   /** A source dependency resolved by a nested build, with the Scala version and environment it was resolved for. */
-  final case class Record(dep: SourceDep, scalaBinaryVersion: String, env: Map[String, String])
+  final case class Record(dep: SourceDep, scalaBinaryVersion: String, scalaVersion: String, env: Map[String, String])
 
   def chain: Seq[String] = sys.props.get(ChainProp).toSeq.flatMap(_.split(',')).filter(_.nonEmpty)
 
   def recordDir(home: File, variant: String): File = new File(home, s"nested-$variant")
 
   /** Called by the nested plugin: records `dep` when the outer build asked for it. */
-  def record(dep: SourceDep, scalaBinaryVersion: String, env: Map[String, String]): Unit =
+  def record(dep: SourceDep, scalaBinaryVersion: String, scalaVersion: String, env: Map[String, String]): Unit =
     sys.props.get(RecordProp).foreach { dir =>
       val p = Properties()
       p.setProperty("id", dep.id)
@@ -45,10 +45,11 @@ private[sourcedeps] object Nested:
       dep.tool.foreach(t => p.setProperty("tool", t.toString))
       if dep.moduleFilter.nonEmpty then p.setProperty("modules", dep.moduleFilter.mkString(","))
       p.setProperty("scalaBinaryVersion", scalaBinaryVersion)
+      p.setProperty("scalaVersion", scalaVersion)
       env.foreach((k, v) => p.setProperty(s"env.$k", v))
       dep.extraEnv.foreach((k, v) => p.setProperty(s"dep.env.$k", v))
       dep.extraArgs.zipWithIndex.foreach((a, i) => p.setProperty(f"dep.arg.$i%04d", a))
-      val out = new File(dir, s"${dep.id}-$scalaBinaryVersion.properties")
+      val out = new File(dir, s"${dep.id}-$scalaVersion.properties")
       out.getParentFile.mkdirs()
       sbt.io.Using.fileOutputStream()(out)(p.store(_, "sbt-source-deps nested dependency"))
     }
@@ -85,6 +86,7 @@ private[sourcedeps] object Nested:
             extraEnv = withPrefix("dep.env.").toMap
           ),
           scala,
+          get("scalaVersion").getOrElse(scala),
           withPrefix("env.").toMap
         )
       }

@@ -16,3 +16,7 @@ $ copy-file changes/Util.scala _checkouts/greeter/util/src/main/scala/greeter/Ut
 # an edit in the Maven checkout rebuilds it
 $ copy-file changes/JGreeter.java _checkouts/jgreeter/src/main/java/jgreeter/JGreeter.java
 > run v1!/java-v2
+
+# an edit in a package named "build" (also the name of Gradle's output directory) rebuilds it too
+$ copy-file changes/Suffix.java _checkouts/jgreeter/src/main/java/jgreeter/build/Suffix.java
+> run v1!/java-v2+b

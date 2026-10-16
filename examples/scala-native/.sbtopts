@@ -1,0 +1,3 @@
+# Scala Native's build is large (about 145,000 settings): give sbt room, it asks for 5 GB itself
+-J-Xmx6G
+-J-Xss2M

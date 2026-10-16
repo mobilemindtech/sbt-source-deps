@@ -57,9 +57,10 @@ The files are listed as follows:
 - **Inside a git work tree**: `git ls-files --cached --others --exclude-standard`, which gives tracked
   files plus untracked ones not ignored by `.gitignore`. Deleted tracked files count as deleted.
 - **Otherwise**: a directory walk.
-- **In both cases**, files under these directories are skipped: `.git`, `target`, `build`, `out`, `.bsp`,
-  `.bloop`, `.metals`, `.idea`, `.vscode`, `.gradle`, `.mill`, `.scala-build`, `.source-deps` and
-  `node_modules`.
+- **In both cases**, files under these directories are skipped: `.git`, `.bsp`, `.bloop`, `.metals`,
+  `.idea`, `.vscode`, `.gradle`, `.mill`, `.scala-build`, `.source-deps` and `node_modules`; and the
+  build output directories `target`, `build` and `out`, except under a `src` directory, where they are
+  packages (`src/main/scala/scala/scalanative/build/` counts).
 
 Hashing contents (rather than timestamps) means that touching a file, switching branches back and
 forth, or restoring a cache never causes a useless rebuild, and a real change is never missed.
@@ -165,6 +166,14 @@ its own `.source-deps`, and the outer build fails to resolve them.
 
 ## `_checkouts`
 
+In a **meta-build** (`project/`), sbt 2 checkouts are built apart too by default (see
+[plugins](plugins.md#how-the-meta-build-uses-the-checkout)): `extraProjects` adds no hidden project
+there. sbt calls `extraProjects` for every build unit without saying which, and a meta-build is loaded
+from within its build's `Load.loadUnit`, so the plugin counts those frames on the stack. The separate
+build publishes only what is declared: the plugin passes `-Dsbt.source-deps.wanted=org:name,...`, and
+the settings it injects set `publish / skip` on every project except those producing these modules for
+the consumer's Scala version and the projects they depend on.
+
 Entries that sbt 2 cannot load (sbt 1, Maven, Gradle, Mill, scala-cli) go through the same engine as
 `SourceDep.local`, with one difference: their modules are only added to the forced versions, never to
 the dependencies, so they replace what the build already depends on.
@@ -190,6 +199,10 @@ and its project ids are unknown before loading:
    version and never a newer one (Scala 3 reads TASTy only from versions up to its own).
    The declarations themselves are removed from `allDependencies` (the project dependency brings the
    module and its dependencies), and excluded when their artifact name differs from the project's.
+   The modules of the checkout projects on the consumer's classpath (linked ones and those they depend
+   on) are forced to the checkout's version, wherever another library asks for them; the other projects
+   of the checkout are published nowhere at that version, so they are not forced, and `update` warns
+   when one of their published modules shows up.
    **Compiler plugins** (`addCompilerPlugin`, configuration `plugin`) get no classpath edge: the
    project's jar is passed as `-Xplugin:`, copied under a name holding its hash, since zinc compares
    `scalacOptions` but not the plugin's content.

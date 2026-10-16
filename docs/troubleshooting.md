@@ -121,4 +121,6 @@ ThisBuild / sourceDepsEnv := Map("JAVA_HOME" -> "/usr/lib/jvm/java-21")
 sbt> sourceDepsClean
 ```
 
-or delete `.source-deps/`. Both are always safe: the next build clones and builds again.
+or delete the plugin's directory (`~/.cache/sbt-source-deps`, or `.source-deps/` when the shared cache
+is off). Both are always safe: the next build clones and builds again. With the shared cache,
+`sourceDepsClean` affects every project using those dependencies.

@@ -44,7 +44,9 @@ scalaVersion := "3.8.4"
 sourceDependencies += SourceDep.local(file("../greeter"))
 ```
 
-Ignore the plugin's working directory:
+Builds go to a cache shared by all your projects (`~/.cache/sbt-source-deps` on Linux; see
+[the shared cache](usage.md#the-shared-cache)). If you turn it off with
+`ThisBuild / sourceDepsShared := false`, they go to `.source-deps/` in your build instead; ignore it:
 
 ```
 # app/.gitignore
@@ -91,14 +93,14 @@ against it. The artifacts of the previous version are deleted.
 sourceDependencies += SourceDep.git("https://github.com/example/greeter.git", ref = "main")
 ```
 
-The repository is cloned into `.source-deps/greeter-<hash>/src` on the first build. **New commits on
+The repository is cloned into `<cache>/greeter-<hash>/src` on the first build. **New commits on
 `main` are not picked up automatically.** That keeps builds reproducible. To move to the latest
 commit, run:
 
 ```
 app> sbt sourceDepsUpdate
 [info] [source-deps] fetching https://github.com/example/greeter.git
-[info] [source-deps] checking out main (9f8e7d6c5b) in .source-deps/greeter-.../src
+[info] [source-deps] checking out main (9f8e7d6c5b) in ~/.cache/sbt-source-deps/greeter-.../src
 [info] [source-deps] building https://github.com/example/greeter.git@main with sbt (first build)
 ```
 

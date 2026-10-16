@@ -57,6 +57,7 @@ $ copy-file changes/Greeter.scala greeter/...
 | `gradle-kotlin` | `build.gradle.kts` with the `scala` plugin (a Scala 2.13 library, used from Scala 3) |
 | `env-sbt` | `sourceDepsEnv` reaches the build (a source generator reads it); changing it rebuilds; per-dependency `.env(...)` and `.args(...)`; `sourceDepsShowOutput` |
 | `java-home` | `.javaHome(...)` reaches Maven, Gradle and scala-cli (each records the JDK it ran on); switching JDK rebuilds with nothing stale; no `.scala-build` in the dependency. Uses `SOURCE_DEPS_TEST_JDK` as the first JDK when set |
+| `shared-cache` | Builds go to `sourceDepsSharedDirectory`, not `.source-deps`; two subprojects using the same dependency with different `.env` keep one version each, through rebuilds; `sourceDepsShared := false` goes back to `.source-deps` |
 | `build-errors` | Message when the tool command does not exist, and when an sbt build publishes nothing (`publish / skip`) |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
 | `local-gradle` | Plain `java-library` without publishing configuration |
@@ -256,6 +257,32 @@ Java source for scala-cli):
   `-Dsource-deps.test.jdk`); without it the test uses the JDK running sbt, which still checks the
   plumbing and the rebuild but not the switch between JDKs.
 
+### Shared cache (2026-10-16)
+
+- Asked for by the maintainer, enabled by default with an opt-out: `sourceDepsShared` (default from
+  `-Dsbt.source-deps.shared` / `SBT_SOURCE_DEPS_SHARED`, else `true`) and `sourceDepsSharedDirectory`
+  (`-Dsbt.source-deps.cache` / `SBT_SOURCE_DEPS_CACHE`, else the OS cache directory). The plugin's
+  build passes `-Dsbt.source-deps.shared=false` to scripted, so the tests keep `<test>/.source-deps`
+  and never touch the real cache; `shared-cache` turns it on inside its test directory.
+- Ids were already global (git URL + ref, or the canonical local path, plus subdirectory), and the
+  dependency locks were already file locks, so sharing needed three fixes:
+  - **Slots.** State and nested records were per variant only: two consumers with different
+    `.env`/`.args`/`sourceDepsEnv` deleted each other's version at every build (this already happened
+    with two subprojects of one build). They are now per slot: variant + hash of env and args. A slot
+    unused for 30 days (its state file is touched by each up-to-date check) is removed at the next build
+    of that dependency, so abandoned options do not pile up.
+  - **Index.** `Poms.published` scanned every POM of the repository for each dependency on every
+    `update`, and could see a version another process was still copying or deleting. Each version now
+    has `repo/.index/<suffix>`, written (atomically) after its files and deleted before them; the scan
+    is only used on staging repositories. Format version 5: every dependency is rebuilt once.
+  - **Repository lock.** Republishing and deleting versions run under `repo/.lock`. `prune` removes
+    empty group/artifact directories, which could race with another process creating a version in the
+    same group. The lock is never held while a tool runs: a nested build publishes into the same
+    repository while the outer build waits for it.
+- Not covered: two separate sbt processes in one scripted test (scripted runs a single build). The
+  cross-process part relies on the file locks already used per dependency.
+- On Windows, deleting the old version of a slot fails while another sbt session holds its jar open.
+
 ### Hash cache (2026-10-15)
 
 - The fingerprint now hashes the SHA-256 of each file instead of feeding the bytes directly, so a
@@ -301,11 +328,13 @@ contains the real Scaladoc, so no empty jar is needed for Maven Central.
 - Roadmap item 4: per-file hash cache (`file-hashes.tsv`), format version 4.
 - Roadmap items 2–3: build duration logged; `sourceDepsShowOutput`; `.args`, `.env`, `.javaHome` per
   dependency (in the fingerprint and in nested records).
+- Roadmap item 3 (part 1): shared cache, on by default (`sourceDepsShared`), with per-slot state,
+  a version index and a repository lock.
 - Roadmap item 1 (tests): Gradle Kotlin DSL + `scala` plugin; `sourceDepsEnv` in the fingerprint;
   `JAVA_HOME` honoured by sbt and on the `PATH`; `JAVA_HOME` with Maven, Gradle and scala-cli
   (`java-home`, which also fixed stale scala-cli classes); Mill warns that it ignores `JAVA_HOME`.
 
-**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the seventeen scripted tests above (the sbt 1.x
+**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the eighteen scripted tests above (the sbt 1.x
 dependency with sbt 1.13.0).
 
 **Not verified yet**
@@ -322,5 +351,9 @@ Next steps, roughly in priority order:
    and do: license, developer info, `homepage`/`scmInfo` in the POM, Central Portal namespace and GPG
    key (or `sbt-ci-release`), CI (GitHub Actions running `scripted`; needs Mill, Gradle, Maven and
    scala-cli), release to Maven Central.
-3. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
-   navigation into sources), and a global shared cache directory.
+3. **`ProjectRef` mode** for sbt 2 dependencies (same build, incremental compilation, IDE navigation
+   into the working copy). The maintainer's goal: edit dependencies and test them without publishing
+   to a local Maven repository, like rebar3's `_checkouts` (a directory whose projects override the
+   declared dependencies). Start with a spike: `RootProject(file(...))` + `dependsOn` in sbt 2.0.10,
+   Scala versions that differ, plugin conflicts, Metals/IntelliJ import. Projects must be known while
+   the build loads, so this needs a helper called from `build.sbt`, not a `sourceDependencies` entry.

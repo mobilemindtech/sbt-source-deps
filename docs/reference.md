@@ -44,7 +44,9 @@ make sure it is unique.
 | Setting | Scope | Default | Description |
 | --- | --- | --- | --- |
 | `sourceDependencies` | project | `Nil` | The project's source dependencies. |
-| `sourceDepsDirectory` | build | `<root>/.source-deps` | Clones, work files and the isolated repository. |
+| `sourceDepsDirectory` | build | `sourceDepsSharedDirectory`, or `<root>/.source-deps` when `sourceDepsShared` is `false` | Clones, work files and the isolated repository. |
+| `sourceDepsShared` | build | `true` (`-Dsbt.source-deps.shared` / `SBT_SOURCE_DEPS_SHARED`) | Use the cache shared by every project of the machine. See [the shared cache](usage.md#the-shared-cache). |
+| `sourceDepsSharedDirectory` | build | `~/.cache/sbt-source-deps` (per OS; `-Dsbt.source-deps.cache` / `SBT_SOURCE_DEPS_CACHE`) | Location of the shared cache. |
 | `sourceDepsCommands` | build | see below | Command used to launch each tool when the dependency has no wrapper script. |
 | `sourceDepsShowOutput` | build | `false` | Log the output of the dependency builds at info level (it is at debug level otherwise). |
 | `sourceDepsEnv` | build | `Map.empty` | Extra environment variables for the build tools (not for git). Part of the fingerprint. `JAVA_HOME` also goes first on the `PATH`, and to sbt as `--java-home`. |
@@ -94,15 +96,17 @@ files.
 ## Directory layout
 
 ```
-.source-deps/
+~/.cache/sbt-source-deps/                 sourceDepsDirectory (or <root>/.source-deps)
 ├── repo/                                 isolated Maven repository (shared by all dependencies)
+│   ├── .index/+src.6bd572a241a1          modules of each published version, written last
+│   ├── .lock                             file lock for writes to the repository
 │   └── example/greeter_3/1.0.0+src.6bd572a241a1/
 │       ├── greeter_3-1.0.0+src.6bd572a241a1.pom
 │       ├── greeter_3-1.0.0+src.6bd572a241a1.jar
 │       └── ...
 └── greeter-1a2b3c4d/                     one directory per dependency (its id)
     ├── src/                              git clone (git dependencies only)
-    ├── state-default                     last published suffix, per variant (state-scala-3 for sbt)
+    ├── state-default                     last published suffix, per slot (see below)
     ├── staging/                          publication with the original versions
     ├── nested-scala-3/                   source dependencies of the dependency's own build (sbt only)
     ├── file-hashes.tsv                   per-file hashes reused while size and mtime are unchanged
@@ -111,8 +115,10 @@ files.
     └── .lock                             file lock serializing work on this dependency
 ```
 
-Only the latest build of each dependency (and variant) is kept in `repo/`. Older versions are
-deleted after a successful build.
+A slot is the variant (`default`, or `scala-3` for sbt builds) plus, when the dependency has extra
+environment variables or arguments, a hash of them: `state-scala-3-1f2e3d4c`. Only the latest build of
+each slot is kept in `repo/`; older versions are deleted after a successful build. Slots no build has
+used for 30 days are deleted too.
 
 ## Versions
 

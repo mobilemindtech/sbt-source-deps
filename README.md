@@ -12,7 +12,7 @@ sourceDependencies ++= Seq(
 ```
 
 On the next `compile`, each dependency is checked out, built with its own tool, published into an
-isolated Maven repository under `.source-deps/`, and added to your project like any other library,
+isolated Maven repository in a cache shared by your projects (`~/.cache/sbt-source-deps`), and added to your project like any other library,
 transitive dependencies included. When its sources change, the next `compile` rebuilds it. When they
 don't, nothing is built.
 

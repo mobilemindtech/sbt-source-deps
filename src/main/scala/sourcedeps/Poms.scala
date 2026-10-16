@@ -9,7 +9,8 @@ final case class Coordinates(groupId: String, artifactId: String, version: Strin
 
 private[sourcedeps] object Poms:
   /**
-   * All modules published into the Maven repository `repo` whose version ends with `versionSuffix`.
+   * All modules published into the Maven repository `repo` (the staging repository of a build) whose
+   * version ends with `versionSuffix`.
    * Coordinates come from the repository layout (group/artifact/version/artifact-version.pom): raw
    * POMs may still hold placeholders such as `${revision}`; the POM only contributes the packaging.
    */
@@ -31,6 +32,32 @@ private[sourcedeps] object Poms:
         }
         .distinct
         .sortBy(_.toString)
+
+  /**
+   * Modules of a version published into the isolated repository, from its index (`repo/.index/<suffix>`).
+   * The index is written after every file of the version and deleted before them, so a version that
+   * another sbt process is still writing or removing is never seen half-done. Scanning the whole
+   * repository for POMs would also grow with every project sharing it.
+   */
+  def indexed(repo: File, suffix: String): Seq[Coordinates] =
+    val f = indexFile(repo, suffix)
+    if !f.isFile then Nil
+    else
+      sbt.io.IO.readLines(f).filter(_.nonEmpty).map { line =>
+        val Array(group, artifact, version, packaging) = line.split('\t'): @unchecked
+        Coordinates(group, artifact, version, packaging)
+      }
+
+  def writeIndex(repo: File, suffix: String, modules: Seq[Coordinates]): Unit =
+    val f = indexFile(repo, suffix)
+    f.getParentFile.mkdirs()
+    val tmp = new File(f.getParentFile, s".${f.getName}.tmp")
+    sbt.io.IO.writeLines(tmp, modules.sortBy(_.toString).map(c => Seq(c.groupId, c.artifactId, c.version, c.packaging).mkString("\t")))
+    java.nio.file.Files.move(tmp.toPath, f.toPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+
+  def deleteIndex(repo: File, suffix: String): Unit = sbt.io.IO.delete(indexFile(repo, suffix))
+
+  private def indexFile(repo: File, suffix: String): File = new File(new File(repo, ".index"), suffix)
 
   def read(pom: File): Option[Coordinates] =
     val f = DocumentBuilderFactory.newInstance()

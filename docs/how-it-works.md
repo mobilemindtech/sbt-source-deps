@@ -16,7 +16,7 @@
         │
         ├─► allDependencies   += selected modules     (V+src.<hash>)
         ├─► csrConfiguration  forceVersions += every published module
-        └─► resolvers         += .source-deps/repo
+        └─► resolvers         += <sourceDepsDirectory>/repo
         │
         ▼
  coursier resolves as usual (transitive dependencies come from the POMs)
@@ -149,7 +149,7 @@ that build reads:
 | Property | Effect in the nested build |
 | --- | --- |
 | `sbt.source-deps.dir` | Default of `sourceDepsDirectory`: nested dependencies are cloned, built and published in the **outer** working directory, so the outer build finds them in `repo/`. A dependency declared at several levels is built once. |
-| `sbt.source-deps.record` | Each source dependency the nested build resolves is recorded in `<middle>/nested-<variant>/`: location, ref, subdirectory, tool, modules and Scala binary version. |
+| `sbt.source-deps.record` | Each source dependency the nested build resolves is recorded in `<middle>/nested-<slot>/`: location, ref, subdirectory, tool, modules and Scala binary version. |
 | `sbt.source-deps.chain` | The ids of the dependencies being built. A dependency already in the chain fails with `cycle between source dependencies: a -> b -> a` instead of waiting forever on its own lock. Chains deeper than 16 fail too. |
 
 The outer build uses the records to:
@@ -204,6 +204,15 @@ Work on a dependency (checkout, fingerprint, build, clean up) runs under two loc
   or a CI job sharing the directory.
 
 The second session waits, then finds the fresh build and skips it.
+
+The repository (`repo/`) is shared by all the dependencies, and by every project when the cache is
+shared:
+
+- copying a build into it and deleting old versions happen under `repo/.lock` (never held while a
+  tool runs, so nested builds can publish meanwhile);
+- a version exists once its index (`repo/.index/<suffix>`) does. The index is written after the files
+  and deleted before them, so a reader never sees a version half-written or half-deleted. It also
+  saves scanning every POM of a repository that grows with each project.
 
 ## Processes
 

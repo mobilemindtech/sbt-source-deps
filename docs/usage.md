@@ -373,16 +373,45 @@ sourceDependencies ++= Seq(
 The arguments go before the publishing task of the tool (`deploy`, `publish`,
 `publishAllPublicationsTo...`, `__.publishM2Local`).
 
-## Where the files go
+## The shared cache
 
-Everything lives in `.source-deps/` at the root of your build:
+Clones, builds and the isolated repository live in a cache shared by every project of the machine:
+
+| OS | Default location |
+| --- | --- |
+| Linux | `$XDG_CACHE_HOME/sbt-source-deps`, or `~/.cache/sbt-source-deps` |
+| macOS | `~/Library/Caches/sbt-source-deps` |
+| Windows | `%LOCALAPPDATA%\sbt-source-deps` |
+
+Two projects using the same dependency (same git URL and ref, or same local directory) build it
+once. Each build is identified by its sources and options, so sharing never mixes different builds:
+
+- a project using other `.env`/`.args`, `sourceDepsEnv` or another Scala version gets its own version
+  of the dependency, next to the others;
+- `sourceDepsUpdate` in one project moves the shared clone of a branch: the other projects pick up the
+  new commit on their next compile;
+- `sourceDepsClean` removes the dependency for every project; the next build of each rebuilds it.
+
+Versions built with options or a Scala version no build has used for 30 days are deleted at the next
+build of that dependency. Deleting the cache directory is always safe.
+
+To use one directory per build instead (`<build root>/.source-deps`), or another location:
 
 ```scala
+ThisBuild / sourceDepsShared := false
+ThisBuild / sourceDepsSharedDirectory := file("/var/cache/source-deps")
+// or any directory, shared or not
 ThisBuild / sourceDepsDirectory := file("/var/cache/my-build/source-deps")
 ```
 
-See the [directory layout](reference.md#directory-layout). Deleting the directory is always safe:
-the next build clones and builds again.
+Without editing the build, for example in CI:
+
+| System property | Environment variable | Effect |
+| --- | --- | --- |
+| `-Dsbt.source-deps.shared=false` | `SBT_SOURCE_DEPS_SHARED=false` | Default of `sourceDepsShared` |
+| `-Dsbt.source-deps.cache=<dir>` | `SBT_SOURCE_DEPS_CACHE=<dir>` | Default of `sourceDepsSharedDirectory` |
+
+See the [directory layout](reference.md#directory-layout).
 
 ## Continuous integration
 
@@ -390,12 +419,17 @@ the next build clones and builds again.
   `sourceDepsUpdate`, but a fresh CI checkout clones the branch's current commit.
 - **Install the tools.** The CI image needs `git` and the build tool of each dependency, unless the
   dependency ships a wrapper.
-- **Cache** `.source-deps/` between runs to skip clones and builds whose sources did not change.
-  The fingerprint is based on content, so a restored cache is reused safely.
+- **Cache** the plugin's directory between runs to skip clones and builds whose sources did not
+  change. Point it inside the workspace with `SBT_SOURCE_DEPS_CACHE`, or disable sharing with
+  `SBT_SOURCE_DEPS_SHARED=false` and cache `.source-deps/`. The fingerprint is based on content, so a
+  restored cache is reused safely.
 - **Warm up** with `sbt update` to build all source dependencies before the rest of the pipeline.
 
 ```yaml
 # GitHub Actions
+env:
+  SBT_SOURCE_DEPS_CACHE: ${{ github.workspace }}/.source-deps
+steps:
 - uses: actions/cache@v4
   with:
     path: .source-deps

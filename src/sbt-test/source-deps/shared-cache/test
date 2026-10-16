@@ -1,0 +1,25 @@
+# builds go to the shared directory, not to <build>/.source-deps
+> a/run a
+> b/run b
+$ exists shared-cache/repo/example/greeter_3
+$ exists shared-cache/repo/.index
+-$ exists .source-deps
+
+# both versions are kept, and both stay up to date
+> checkVersions 2
+> a/sourceDepsStatus
+> a/run a
+> b/run b
+> checkVersions 2
+
+# a change in the dependency replaces each version, without leaving the old ones behind
+$ copy-file changes/extra.scala greeter/src/main/scala/Extra.scala
+> a/run a
+> b/run b
+> checkVersions 2
+
+# disabled: back to <build>/.source-deps
+> set ThisBuild / sourceDepsShared := false
+> a/run a
+$ exists .source-deps/repo/example/greeter_3
+> checkVersions 1

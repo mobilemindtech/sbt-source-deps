@@ -15,6 +15,8 @@ object SourceDepsPlugin extends AutoPlugin:
 
     val sourceDependencies = settingKey[Seq[SourceDep]]("Dependencies built from git repositories or local directories.")
     val sourceDepsDirectory = settingKey[File]("Where source dependencies are cloned and published.")
+    val sourceDepsShared = settingKey[Boolean]("Use the cache shared by every project of the machine (sourceDepsSharedDirectory) instead of <build root>/.source-deps.")
+    val sourceDepsSharedDirectory = settingKey[File]("Location of the shared cache.")
     val sourceDepsCommands = settingKey[Map[BuildTool, Seq[String]]]("Command used to launch each build tool when the project has no wrapper.")
     val sourceDepsEnv = settingKey[Map[String, String]]("Extra environment variables for the dependency builds (e.g. JAVA_HOME).")
     val sourceDepsShowOutput = settingKey[Boolean]("Log the output of the dependency builds at info level instead of debug.")
@@ -39,9 +41,13 @@ object SourceDepsPlugin extends AutoPlugin:
   }
 
   override def buildSettings: Seq[Setting[?]] = Seq(
+    sourceDepsShared := SharedCache.enabledByDefault,
+    sourceDepsSharedDirectory := SharedCache.defaultDirectory,
     // a build launched by this plugin (as a dependency) shares the working directory of the outer build
-    sourceDepsDirectory := sys.props.get(Nested.DirProp).map(file)
-      .getOrElse((LocalRootProject / baseDirectory).value / ".source-deps"),
+    sourceDepsDirectory := sys.props.get(Nested.DirProp).map(file).getOrElse {
+      if sourceDepsShared.value then sourceDepsSharedDirectory.value
+      else (LocalRootProject / baseDirectory).value / ".source-deps"
+    },
     sourceDepsCommands := Builders.defaultCommands,
     sourceDepsEnv := Map.empty,
     sourceDepsShowOutput := false

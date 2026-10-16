@@ -9,12 +9,18 @@ import java.util.concurrent.locks.ReentrantLock
 import sbt.util.Logger
 
 /**
- * Layout under the root directory:
+ * Layout under the root directory (per project, or shared by every project of the machine):
  *   repo/          isolated Maven repository shared by all source dependencies
+ *   repo/.index/   one file per published suffix, written last: a version exists once its index does
  *   <id>/src/      git clone (git dependencies only)
- *   <id>/state-*   last published version per variant, used to clean up stale artifacts
+ *   <id>/state-*   last published version per slot, used to clean up stale artifacts
  *   <id>/nested-*  source dependencies of the dependency's own build (see [[Nested]])
  *   <id>/file-hashes.tsv  per-file hashes reused while size and mtime do not change (see [[HashCache]])
+ *
+ * A slot is the variant (Scala binary version for sbt builds) plus the extra environment and
+ * arguments: consumers building one dependency with different options keep one version each instead
+ * of deleting each other's. Writes to `repo/` happen under its lock, since other sbt processes may
+ * share it.
  */
 final case class Resolved(selected: Seq[Coordinates], published: Seq[Coordinates])
 
@@ -29,7 +35,7 @@ final class Engine(
   val repo: File = new File(root, "repo")
 
   /** Bump to invalidate every previously published artifact (e.g. when builder flags change). */
-  private val formatVersion = "4"
+  private val formatVersion = "5"
 
   /**
    * Builds `dep` when stale; returns the selected modules and every module to force (the build's own
@@ -46,15 +52,19 @@ final class Engine(
         throw ProcessFailed(s"could not detect the build tool of $dep in $projectDir (use .buildTool(...))")
       }
       val variant = variantOf(tool, scalaBinaryVersion)
-      if fetch then fetchNested(home, variant, Set(dep.id))
+      val slot = slotOf(variant, dep, env)
+      if fetch then fetchNested(home, slot, Set(dep.id))
       val own = ownFingerprint(dep, projectDir, tool, variant, env)
-      val expected = suffixOf(own, nestedLines(home, variant, Set(dep.id)))
+      val expected = suffixOf(own, nestedLines(home, slot, Set(dep.id)))
 
-      val published = Poms.published(repo, expected) match
+      val published = Poms.indexed(repo, expected) match
         case Seq() =>
-          val reason = if readState(home, variant).isEmpty then "first build" else "changed since the last build"
+          val reason =
+            if readState(home, slot).nonEmpty then "changed since the last build"
+            else if slots(home).nonEmpty then "first build with these options"
+            else "first build"
           log.info(s"[source-deps] building $dep with ${tool.toString.toLowerCase} ($reason)")
-          val nestedDir = Nested.recordDir(home, variant)
+          val nestedDir = Nested.recordDir(home, slot)
           sbt.io.IO.delete(nestedDir)
           val staging = new File(home, "staging")
           sbt.io.IO.delete(staging)
@@ -67,21 +77,27 @@ final class Engine(
           Builders.forTool(tool).publish(req)
           // the build may have recorded nested source dependencies (first build, or a changed set):
           // the suffix is final only now, so later up-to-date checks compute the same value
-          val suffix = suffixOf(own, nestedLines(home, variant, Set(dep.id)))
-          val result = Republish(staging, repo, suffix)
+          val suffix = suffixOf(own, nestedLines(home, slot, Set(dep.id)))
+          val result = Engine.withLock(repo) {
+            val modules = Republish(staging, repo, suffix)
+            if modules.nonEmpty then Poms.writeIndex(repo, suffix, modules)
+            modules
+          }
           if result.isEmpty then
             throw ProcessFailed(s"the build of $dep did not publish any module into $staging.\n${Engine.nothingPublishedHint(tool)}")
-          readState(home, variant).filter(_ != suffix).foreach(removeVersion)
-          writeState(home, variant, suffix)
+          readState(home, slot).filter(_ != suffix).foreach(removeVersion)
+          writeState(home, slot, suffix)
+          removeUnusedSlots(home)
           val seconds = (System.nanoTime() - started) / 1000000000L
           log.info(s"[source-deps] built $dep in ${Engine.duration(seconds)}: ${result.size} module(s), version suffix $suffix")
-          Poms.published(repo, suffix)
+          result
         case existing =>
           log.debug(s"[source-deps] $dep is up to date ($expected)")
+          stateFile(home, slot).setLastModified(System.currentTimeMillis())
           existing
 
       // modules of nested source dependencies come transitively: force them too
-      val transitive = nestedPublished(home, variant, Set(dep.id))
+      val transitive = nestedPublished(home, slot, Set(dep.id))
       Resolved(select(dep, published), (published ++ transitive).distinct)
     }
 
@@ -90,7 +106,7 @@ final class Engine(
     val home = new File(root, dep.id)
     projectDir(dep, home).filter(_.isDirectory).map { dir =>
       detect(dep, dir).exists { tool =>
-        Poms.published(repo, versionSuffix(dep, dir, tool, scalaBinaryVersion, env, Set(dep.id))).nonEmpty
+        Poms.indexed(repo, versionSuffix(dep, dir, tool, scalaBinaryVersion, env, Set(dep.id))).nonEmpty
       }
     }
 
@@ -107,15 +123,21 @@ final class Engine(
   private def variantOf(tool: BuildTool, scalaBinary: String): String =
     if tool == BuildTool.Sbt then s"scala-$scalaBinary" else "default"
 
+  /** The variant, plus a hash of the extra environment and arguments when there are any. */
+  private def slotOf(variant: String, dep: SourceDep, baseEnv: Map[String, String]): String =
+    val config = configLines(dep, baseEnv)
+    if config.isEmpty then variant else s"$variant-${Hashing.sha256(config.mkString("\n")).take(8)}"
+
+  private def configLines(dep: SourceDep, baseEnv: Map[String, String]): Seq[String] =
+    (baseEnv ++ dep.extraEnv).toSeq.sorted.map((k, v) => s"env=$k=$v") ++ dep.extraArgs.map(a => s"arg=$a")
+
   /**
    * The environment and extra arguments are part of it: a different `JAVA_HOME`, Maven profile, or any
    * variable the build reads rebuilds the dependency.
    */
   private def ownFingerprint(dep: SourceDep, dir: File, tool: BuildTool, variant: String, baseEnv: Map[String, String]): String =
-    val envLines = (baseEnv ++ dep.extraEnv).toSeq.sorted.map((k, v) => s"env=$k=$v")
-    val argLines = dep.extraArgs.map(a => s"arg=$a")
     val cache = new File(new File(root, dep.id), "file-hashes.tsv")
-    Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant") ++ envLines ++ argLines, Some(cache))
+    Hashing.fingerprint(dir, Seq(s"format=$formatVersion", s"tool=$tool", s"variant=$variant") ++ configLines(dep, baseEnv), Some(cache))
 
   /**
    * The suffix appended to every published version: the dependency's own sources plus, recursively,
@@ -125,14 +147,14 @@ final class Engine(
   private def suffixOf(ownFingerprint: String, nested: Seq[String]): String =
     s"+src.${Hashing.sha256((ownFingerprint +: nested).mkString("\n")).take(12)}"
 
-  private def nestedLines(home: File, variant: String, visited: Set[String]): Seq[String] =
-    Nested.read(home, variant).map(r => s"nested=${r.dep.id}@${currentSuffix(r, visited).getOrElse("missing")}")
+  private def nestedLines(home: File, slot: String, visited: Set[String]): Seq[String] =
+    Nested.read(home, slot).map(r => s"nested=${r.dep.id}@${currentSuffix(r, visited).getOrElse("missing")}")
 
   private def versionSuffix(
       dep: SourceDep, dir: File, tool: BuildTool, scalaBinary: String, env: Map[String, String], visited: Set[String]
   ): String =
     val variant = variantOf(tool, scalaBinary)
-    suffixOf(ownFingerprint(dep, dir, tool, variant, env), nestedLines(new File(root, dep.id), variant, visited))
+    suffixOf(ownFingerprint(dep, dir, tool, variant, env), nestedLines(new File(root, dep.id), slotOf(variant, dep, env), visited))
 
   /** The suffix a nested dependency would be published with now; None when it is not checked out. */
   private def currentSuffix(r: Nested.Record, visited: Set[String]): Option[String] =
@@ -144,17 +166,17 @@ final class Engine(
       yield versionSuffix(r.dep, dir, tool, r.scalaBinaryVersion, r.env, visited + r.dep.id)
 
   /** Every module currently published by the nested dependencies of `home`, recursively. */
-  private def nestedPublished(home: File, variant: String, visited: Set[String]): Seq[Coordinates] =
-    Nested.read(home, variant).filterNot(r => visited(r.dep.id)).flatMap { r =>
+  private def nestedPublished(home: File, slot: String, visited: Set[String]): Seq[Coordinates] =
+    Nested.read(home, slot).filterNot(r => visited(r.dep.id)).flatMap { r =>
       val nestedHome = new File(root, r.dep.id)
-      val own = currentSuffix(r, visited).toSeq.flatMap(Poms.published(repo, _))
+      val own = currentSuffix(r, visited).toSeq.flatMap(Poms.indexed(repo, _))
       val tool = projectDir(r.dep, nestedHome).filter(_.isDirectory).flatMap(detect(r.dep, _))
-      own ++ tool.toSeq.flatMap(t => nestedPublished(nestedHome, variantOf(t, r.scalaBinaryVersion), visited + r.dep.id))
+      own ++ tool.toSeq.flatMap(t => nestedPublished(nestedHome, nestedSlot(t, r), visited + r.dep.id))
     }
 
   /** `sourceDepsUpdate` also moves the branches of nested git dependencies, so their changes show up. */
-  private def fetchNested(home: File, variant: String, visited: Set[String]): Unit =
-    Nested.read(home, variant).filterNot(r => visited(r.dep.id)).foreach { r =>
+  private def fetchNested(home: File, slot: String, visited: Set[String]): Unit =
+    Nested.read(home, slot).filterNot(r => visited(r.dep.id)).foreach { r =>
       val nestedHome = new File(root, r.dep.id)
       Engine.withLock(nestedHome) {
         r.dep.location match
@@ -163,9 +185,13 @@ final class Engine(
           case SourceLocation.Local(_)      => ()
       }
       projectDir(r.dep, nestedHome).filter(_.isDirectory).flatMap(detect(r.dep, _)).foreach { t =>
-        fetchNested(nestedHome, variantOf(t, r.scalaBinaryVersion), visited + r.dep.id)
+        fetchNested(nestedHome, nestedSlot(t, r), visited + r.dep.id)
       }
     }
+
+  /** The slot a nested build used for its dependency: computed with that build's own `sourceDepsEnv`. */
+  private def nestedSlot(tool: BuildTool, r: Nested.Record): String =
+    slotOf(variantOf(tool, r.scalaBinaryVersion), r.dep, r.env)
 
   private def projectDir(dep: SourceDep, home: File): Option[File] =
     val base = dep.location match
@@ -209,28 +235,46 @@ final class Engine(
   /** `core_3` -> `core`, `core_2.13` -> `core`, `plugin_2.12_1.0` -> `plugin`. */
   private def baseName(artifactId: String): String = artifactId.replaceAll("(_[0-9][0-9.]*(-[A-Za-z0-9]+)?)+$", "")
 
-  private def stateFile(home: File, variant: String) = new File(home, s"state-$variant")
+  private def stateFile(home: File, slot: String) = new File(home, s"state-$slot")
 
-  private def readState(home: File, variant: String): Option[String] =
-    val f = stateFile(home, variant)
+  private def readState(home: File, slot: String): Option[String] =
+    val f = stateFile(home, slot)
     if !f.isFile then None
     else
       val p = Properties()
       sbt.io.Using.fileInputStream(f)(p.load)
       Option(p.getProperty("suffix"))
 
-  private def writeState(home: File, variant: String, suffix: String): Unit =
+  private def writeState(home: File, slot: String, suffix: String): Unit =
     home.mkdirs()
     val p = Properties()
     p.setProperty("suffix", suffix)
-    sbt.io.Using.fileOutputStream()(stateFile(home, variant))(p.store(_, "sbt-source-deps"))
+    sbt.io.Using.fileOutputStream()(stateFile(home, slot))(p.store(_, "sbt-source-deps"))
 
-  /** Deletes the version directories published with `suffix` (group/artifact/<version>). */
+  private def slots(home: File): Seq[String] =
+    Option(home.listFiles()).getOrElse(Array.empty[File]).toSeq.map(_.getName).filter(_.startsWith("state-")).map(_.stripPrefix("state-"))
+
+  /**
+   * Versions built for other options or Scala versions are kept while some build still uses them (each
+   * up-to-date check touches its state file); those unused for [[Engine.unusedSlotDays]] days go.
+   */
+  private def removeUnusedSlots(home: File): Unit =
+    val limit = System.currentTimeMillis() - Engine.unusedSlotDays * 24L * 3600 * 1000
+    slots(home).filter(slot => stateFile(home, slot).lastModified < limit).foreach { slot =>
+      readState(home, slot).foreach(removeVersion)
+      sbt.io.IO.delete(Seq(stateFile(home, slot), Nested.recordDir(home, slot)))
+    }
+
+  /** Deletes the version directories published with `suffix` (group/artifact/<version>), index first. */
   private def removeVersion(suffix: String): Unit =
-    Poms.published(repo, suffix).foreach { c =>
-      val dir = Republish.versionDir(repo, c)
-      sbt.io.IO.delete(dir)
-      prune(dir.getParentFile)
+    Engine.withLock(repo) {
+      val modules = Poms.indexed(repo, suffix)
+      Poms.deleteIndex(repo, suffix)
+      modules.foreach { c =>
+        val dir = Republish.versionDir(repo, c)
+        sbt.io.IO.delete(dir)
+        prune(dir.getParentFile)
+      }
     }
 
   /** Deletes artifact and group directories left without any version directory (metadata files only). */
@@ -242,6 +286,8 @@ final class Engine(
       current = current.getParentFile
 
 object Engine:
+  val unusedSlotDays = 30
+
   def duration(seconds: Long): String =
     if seconds < 60 then s"$seconds s" else s"${seconds / 60} min ${seconds % 60} s"
 

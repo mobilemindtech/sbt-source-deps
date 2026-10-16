@@ -257,6 +257,51 @@ Java source for scala-cli):
   `-Dsource-deps.test.jdk`); without it the test uses the JDK running sbt, which still checks the
   plumbing and the rebuild but not the switch between JDKs.
 
+### Spike: projects of another build (`ProjectRef`, `_checkouts`) (2026-10-16)
+
+Goal (maintainer): edit a dependency and test it from the consumer without publishing it anywhere, like
+rebar3's `_checkouts`. Spike with sbt 2.0.10, a two-module library build (`core` -> `util`, its own
+plugin and `ThisBuild` settings) and a consumer:
+
+- `dependsOn(ProjectRef(file("../lib"), "core"))` works. External projects are addressed as
+  `{file:/.../lib/}core/...` on the command line.
+- **Incremental compilation** crosses the builds: changing `util/Util.scala` recompiles that file and
+  its dependent in `core` only. Outputs of the external build go to the **consumer's**
+  `target/out/jvm/...`, so the dependency's directory stays clean.
+- **Plugins**: each build keeps its plugins (`core/assembly` works), and the consumer's auto plugins
+  apply to the external projects too (`core/scalafmtOnCompile` exists). `ThisBuild` stays per build.
+- **Scala versions**: sbt 2 refuses `app (Scala 3.8.4) depends on core (Scala 2.13.16)` unless
+  `allowMismatchScala := true` (2.13 from 3 then works). Settings of external projects can be set from
+  the consumer; appended in `onLoad` with `Project.extract(state).appendWithoutSession` they win over
+  the dependency's own project-level `scalaVersion` (guard with a `State` attribute: the append runs
+  `onLoad` again, which looped until `OutOfMemoryError`).
+- **Substitution**: a project dependency already replaces the same module requested by
+  `libraryDependencies` or transitively, with `dependsOn` at load time. When the edge is added after
+  load (see below), coursier picks the higher published version (`greeter_3:1.0.0` wanted by another
+  library over the local `0.9.0-SNAPSHOT`), dropping the local module's own dependencies (`scala-xml`).
+  `dependencyOverrides` to the local version fixes it, the same idea as forced versions in jar mode;
+  `excludeDependencies` does not (it drops the local module's dependencies too).
+- **No `build.sbt` change needed**: external builds are only loaded when a project of the root build
+  references them (`dependsOn`/`aggregate`), and project ids are unknown before loading. An
+  `AutoPlugin.derivedProjects` can add a hidden project `dependsOn(RootProject(dir))` for each build in
+  `<root>/_checkouts`, so sbt loads them; after loading, `Global / buildDependencies` (a setting,
+  `BuildDependencies.addClasspath`) links each consumer project to the checkout projects whose
+  `(organization, name)` it declares in `libraryDependencies`.
+- **IDE**: `bspWorkspaceBuildTargets` lists the checkout projects (`core/Compile`, `util/Compile`, ...),
+  so Metals indexes the working copy.
+
+Proposed design (`_checkouts` mode, sbt 2 dependencies only):
+1. Every directory in `<build root>/_checkouts/` (a symlink is fine) that holds an sbt 2 build is
+   loaded with the consumer's build; non-sbt or sbt 1 builds are reported and skipped.
+2. A consumer project that declares `libraryDependencies` on a module produced by a checkout project
+   depends on that project instead (classpath edge), with its version forced (`dependencyOverrides`).
+   A module only reached transitively must be declared to be replaced.
+3. Checkout projects compile with the consumer's Scala version when their `crossScalaVersions` has
+   one with the same binary version; a 2.13 project used from Scala 3 gets `allowMismatchScala`.
+4. No `build.sbt` change: create or remove `_checkouts/<name>` and `reload`.
+Limits: one Scala version per checkout project (two consumer projects on different Scala versions need
+jar mode), plugin conflicts between builds, nested `_checkouts` ignored.
+
 ### Shared cache (2026-10-16)
 
 - Asked for by the maintainer, enabled by default with an opt-out: `sourceDepsShared` (default from
@@ -357,3 +402,16 @@ Next steps, roughly in priority order:
    declared dependencies). Start with a spike: `RootProject(file(...))` + `dependsOn` in sbt 2.0.10,
    Scala versions that differ, plugin conflicts, Metals/IntelliJ import. Projects must be known while
    the build loads, so this needs a helper called from `build.sbt`, not a `sourceDependencies` entry.
+4. **sbt plugins from source** (requested 2026-10-16). Use the plugin in the meta-build
+   (`project/project/plugins.sbt` + `sourceDependencies` in `project/plugins.sbt`, or a dedicated
+   setting) to build an sbt plugin from a git/local checkout instead of `publishLocal`. Motivating case:
+   a patched Scala Native (arena allocation for classes/case classes, not only pointers) to study and
+   tweak. To investigate:
+   - does it already work, since the meta-build is a project with `allDependencies`?
+   - sbt 2 support of the plugin being built (the consumer runs sbt 2; Scala Native's sbt plugin may
+     only target sbt 1.x), and the `_sbt2_3` artifact naming;
+   - plugins that add libraries of their own version to the main build (Scala Native adds nativelib,
+     javalib, scalalib, the compiler plugin, ... at `nativeVersion`): those come from the same source
+     build, so the main build must resolve them from the isolated repository with the suffixed version;
+   - large multi-module builds with cross Scala versions (Scala Native publishes per Scala version):
+     build time, choosing what to publish (`.args`, a task other than `publish`).

@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # JDK 17 is the second JDK of the java-home test; the last one listed is the default
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: |
@@ -43,12 +43,13 @@ jobs:
         with:
           apps: scala-cli
 
+      # informative only (on Windows some tools are .bat/.cmd files that bash cannot find by name)
       - name: Tool versions
         run: |
-          java -version
-          mvn -v
-          gradle -v
-          scala-cli version
+          java -version || true
+          mvn -v || true
+          gradle -v || true
+          scala-cli version || true
 
       # sbt 2's runner starts a thin client by default: run a server in this process
       - name: Compile and Scaladoc

@@ -372,8 +372,10 @@ jar mode), plugin conflicts between builds, nested `_checkouts` ignored.
   consumer's classpath, whose forced version exists nowhere: now only the classpath closure, with the
   platform in the name (`nativelib_native0.5_3`). The others are reported by a warning after `update`
   (checked by hand with a fake published library depending on an unused checkout project).
-- A fake `platform := "fake1"` (with an inter-project dependency) did not reproduce the platform failure
-  seen with Scala Native: no scripted test for it yet.
+- A fake `platform := "fake1"` did not reproduce the platform failure seen with Scala Native, neither
+  with an inter-project dependency in the checkout nor with the declared module carrying
+  `.platform("fake1")` like Scala Native's plugin does: the Ivy fallback (`csrExtraProjects`) then has
+  the platform in its names. What differs in Scala Native's build is not isolated; no scripted test.
 
 ### sbt plugins from source: Scala Native (2026-10-16)
 
@@ -528,6 +530,8 @@ Next steps, roughly in priority order:
 4. **sbt plugins from source**: done through `_checkouts` (see "sbt plugins from source: Scala
    Native" and "Loading the plugin's build once"). Follow-ups: a scripted test for platform suffixes
    (checked by hand with Scala Native only; a fake platform does not reproduce it); verify
-   `examples/scala-native` end to end on a machine with enough free memory; the separate build reloads
-   all settings once to apply its overrides (`appendWithSession`); its share of the ~1 min 50 s is
-   not measured yet.
+   `examples/scala-native` end to end on a machine with enough free memory; the separate build took
+   about 1 min 50 s when run by the plugin but 57 s alone (2026-10-16, Scala Native): about 10 s
+   compiling a file of Scala Native's own meta-build, 30 s loading (142,000 settings), 1 s applying the
+   overrides (`appendWithSession` is cheap), 8 s publishing with the incremental compilation of `tools`.
+   The gap with the run next to the user's sbt is not explained yet.

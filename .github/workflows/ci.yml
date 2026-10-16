@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  scripted:
+    name: scripted (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Linux is the verified platform; macOS and Windows are not supported yet: their results are
+    # informative (see docs/development.md, "Not verified yet")
+    continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 17 is the second JDK of the java-home test; the last one listed is the default
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            21
+
+      - uses: sbt/setup-sbt@v1
+
+      # the build tools of the test dependencies (Maven is preinstalled on the runners; Mill comes
+      # with the tests' ./mill bootstrap script)
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.8.0"
+      - uses: coursier/setup-action@v1
+        with:
+          apps: scala-cli
+
+      - name: Tool versions
+        run: |
+          java -version
+          mvn -v
+          gradle -v
+          scala-cli version
+
+      # sbt 2's runner starts a thin client by default: run a server in this process
+      - name: Compile and Scaladoc
+        run: sbt --server --batch --no-colors compile doc
+
+      - name: scripted
+        run: |
+          # setup-java exports JAVA_HOME_17_X64 or JAVA_HOME_17_ARM64
+          jdk17="${JAVA_HOME_17_X64:-$JAVA_HOME_17_ARM64}"
+          SOURCE_DEPS_TEST_JDK="$jdk17" sbt --server --batch --no-colors --supershell=never scripted

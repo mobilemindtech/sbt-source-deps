@@ -74,6 +74,13 @@ downloads Mill and a JDK on the first run. A full `scripted` run takes about 20 
 SOURCE_DEPS_TEST_JDK=/usr/lib/jvm/java-17 sbt scripted
 ```
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs `compile doc` and the whole `scripted` suite on every push to `main`
+and on pull requests, with JDK 21 (default) and 17 (`SOURCE_DEPS_TEST_JDK`), Gradle 9.8.0, the runner's
+Maven, and scala-cli from coursier. Linux must pass; macOS and Windows run with `continue-on-error`
+until they are supported, so their results show what breaks there.
+
 ## Design decisions and findings
 
 A record of the choices made and the problems found while building the plugin.

@@ -1,5 +1,7 @@
 # sbt-source-deps
 
+[![CI](https://github.com/mobilemindtech/sbt-source-deps/actions/workflows/ci.yml/badge.svg)](https://github.com/mobilemindtech/sbt-source-deps/actions/workflows/ci.yml)
+
 An sbt 2 plugin to depend on projects **built from source**, from a git repository or a local
 directory, whatever their build tool: **sbt, Mill, Gradle, Maven or scala-cli**.
 

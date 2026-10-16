@@ -11,9 +11,8 @@ sbt "scripted source-deps/local-maven"
 
 The plugin targets sbt 2.0.x and is compiled with Scala 3.8.4, the version sbt 2.0.10 runs on.
 
-Scaladoc is disabled (`Compile / doc / sources := Nil`), because Scaladoc cannot read
-`lmcoursier`'s `@data` classes used to force versions. This must be solved before publishing to Maven
-Central, which requires a Javadoc jar. An empty jar is enough.
+Scaladoc needs `"io.github.alexarchambault" %% "data-class" % "0.2.8" % Provided` on the classpath
+(see "Scaladoc and `lmcoursier`" below). Keep that exact version.
 
 ## Source layout
 
@@ -238,7 +237,15 @@ Tried with app → middle (uses the plugin) → greeter. Findings, in order:
 ### Scaladoc and `lmcoursier`
 
 `publishLocal` of the plugin failed in `Compile / doc` ("undefined: new dataclass.data"). The
-plugin's docs are disabled for now.
+plugin uses `lmcoursier` classes declared with `@dataclass.data`, and their TASTy references that
+annotation, but `librarymanagement-coursier` does not publish `data-class` as a dependency. Scaladoc
+(unlike the compiler) resolves the annotation and fails when it is missing.
+
+Fix: add `data-class` as a `Provided` dependency (compile-time only; `provided` scope in the POM is
+not transitive). The version must match the annotation's constructor that `lmcoursier` was compiled
+against: 0.2.7 has no Scala 3 artifact, 0.2.8 works, and 0.2.9/0.2.10/0.2.11 add constructor
+parameters and fail with "wrong number of arguments ... dataclass.data". With 0.2.8 the Javadoc jar
+contains the real Scaladoc, so no empty jar is needed for Maven Central.
 
 ## Status
 
@@ -280,7 +287,7 @@ dependency with sbt 1.13.0).
 Next steps, roughly in priority order:
 
 1. **Tests for what is not verified yet** (list above).
-2. **Publishing the plugin**: fix Scaladoc (or publish an empty Javadoc jar), POM metadata, CI
+2. **Publishing the plugin**: Scaladoc fixed (data-class 0.2.8, Provided); still to do: POM metadata, CI
    (GitHub Actions running `scripted`), release to Maven Central.
 3. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
    navigation into sources), and a global shared cache directory.

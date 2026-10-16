@@ -1,0 +1,14 @@
+# lib3 (not lib2_13) replaces example:kit, aligned to 3.8.4 (a 3.8 consumer cannot read 3.9 TASTy);
+# marker3 (not marker2_13) runs as the compiler plugin, passed as a jar
+> run kit-3
+$ exists marker-ran
+
+# an edit in the checkout is compiled incrementally on the next run
+$ copy-file changes/Kit.scala _checkouts/kit/lib3/src/main/scala/kit/Kit.scala
+> run kit-3b
+
+# an edit in the compiler plugin recompiles the consumer (its sources are unchanged): the plugin jar is
+# passed under a name holding its hash
+$ copy-file changes/MarkerPlugin.scala _checkouts/kit/marker3/src/main/scala/marker/MarkerPlugin.scala
+> run kit-3b
+$ exists marker-ran-v2

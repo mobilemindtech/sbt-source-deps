@@ -91,6 +91,10 @@ Wherever a forced module appears in the dependency graph, it resolves to the sou
 | `allDependencies` | Appends `sourceDepsResolve`. |
 | `csrConfiguration` | Appends `sourceDepsForcedVersions` and the `_checkouts` modules to the forced versions. |
 | `allowMismatchScala` | `true` when the project uses a 2.13-only checkout project from Scala 3. |
+| `allDependencies` | Without the declarations a checkout replaces. |
+| `excludeDependencies` | The declared modules whose artifact name differs from the checkout project's. |
+| `scalacOptions` | `-Xplugin:<jar>` for the compiler plugins a checkout replaces. |
+| `csrInterProjectDependencies` | The coursier projects of the checkout projects (platform suffixes). |
 | `Global / buildDependencies` | Adds the edges from your projects to the sbt 2 checkout projects. |
 | `Global / onLoad`, `Global / onUnload` | Align the Scala version of the checkout projects; log the checkouts in use. |
 | `extraProjects` | The hidden `sourceDepsCheckouts` project, when `_checkouts/` holds an sbt 2 build. |

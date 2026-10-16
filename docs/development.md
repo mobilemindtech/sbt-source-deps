@@ -59,6 +59,7 @@ $ copy-file changes/Greeter.scala greeter/...
 | `java-home` | `.javaHome(...)` reaches Maven, Gradle and scala-cli (each records the JDK it ran on); switching JDK rebuilds with nothing stale; no `.scala-build` in the dependency. Uses `SOURCE_DEPS_TEST_JDK` as the first JDK when set |
 | `shared-cache` | Builds go to `sourceDepsSharedDirectory`, not `.source-deps`; two subprojects using the same dependency with different `.env` keep one version each, through rebuilds; `sourceDepsShared := false` goes back to `.source-deps` |
 | `checkouts` | `_checkouts/greeter` (sbt 2, two modules, a project-level 2.13 `scalaVersion` with 3 in `crossScalaVersions`, `scala-xml`, uses this plugin itself) replaces `example:greeter:1.0.0`, published nowhere; compiled with Scala 3; works after `reload`; an edit recompiles incrementally; `_checkouts/jgreeter` (Maven) replaces `example:jgreeter:1.0.0` through jar mode and is rebuilt after an edit; a directory without a build is skipped with a warning; the sbt checkout is not published |
+| `checkouts-cross` | One project per Scala version (`lib2_13`, `lib3` both publish `kit`; `lib3` on 3.9.0 with 3.8.4 in `crossScalaVersions`): `lib3` is picked and aligned to 3.8.4; a compiler plugin (`marker`, `CrossVersion.full`, `addCompilerPlugin`) runs from `marker3`'s jar; editing the plugin recompiles the consumer |
 | `build-errors` | Message when the tool command does not exist, and when an sbt build publishes nothing (`publish / skip`) |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
 | `local-gradle` | Plain `java-library` without publishing configuration |
@@ -332,6 +333,31 @@ jar mode), plugin conflicts between builds, nested `_checkouts` ignored.
   4. **Cost**: the main build compiles `javalib` and `scalalib` (the Scala standard library for Native)
      from source once; later runs are incremental.
 
+### sbt plugins from source: Scala Native (2026-10-16)
+
+Done with a copy of the maintainer's clone (sbt 2.0.9 build, uncommitted work untouched) and a minimal
+Scala Native app on sbt 2.0.10: plugin, `tools`, `nscplugin` and the runtime libraries come from
+`_checkouts/scala-native`, and `run` prints from a native binary. Fixes needed on the way:
+
+- **Selection** among projects publishing one module (`nativelib2_12`, `nativelib2_13`,
+  `nativelib3`), by the declared cross version and `crossScalaVersions`.
+- **Exact Scala version**: `nativelib3` builds with 3.9.0 by default; a 3.8.4 consumer cannot read its
+  TASTy. Alignment now prefers the consumer's exact version, else the highest not above it.
+- **Compiler plugins** (`nscplugin`, configuration `plugin->default(compile)`): `-Xplugin:` with the
+  project's jar, copied under its hash (otherwise an edited plugin does not recompile the consumer).
+- **Declarations removed from `allDependencies`** with `diff`, not by organization and name, which also
+  removed the checkout project's own module (from `projectDependencies`) and its dependencies.
+- **Platform suffix**: `csrInterProjectDependencies` only covers `dependsOn` neighbours; other project
+  modules fall back to `projectDescriptors` (Ivy), named without sbt 2's platform
+  (`nativelib_3` for `nativelib_native0.5_3`), so resolution failed with "not found". The checkout
+  projects' `csrProject` are added. (`projectDescriptors` and `csrExtraProjects` in sbt 2.0.10's
+  `CoursierInputsTasks`.)
+- **Memory**: `reload` with Scala Native loaded twice ran out of heap at sbt's default; fine with
+  `-J-Xmx6G`.
+- Edit loop checked by hand: `nativelib` and `nscplugin` edits apply on the next `run`; `tools` after
+  `reload`. Timings on this machine: about 5 minutes for the first full build, about 1.5 minutes for a
+  fresh sbt start afterwards (loading twice), seconds for a library edit.
+
 ### `_checkouts` mode (2026-10-16)
 
 Findings while implementing the design above (see how-it-works.md for the mechanism):
@@ -426,6 +452,7 @@ contains the real Scaladoc, so no empty jar is needed for Maven Central.
 - Roadmap item 4: per-file hash cache (`file-hashes.tsv`), format version 4.
 - Roadmap items 2–3: build duration logged; `sourceDepsShowOutput`; `.args`, `.env`, `.javaHome` per
   dependency (in the fingerprint and in nested records).
+- Roadmap item 4: sbt plugins from source through `_checkouts` (meta-build), checked with Scala Native.
 - Roadmap item 3 (part 2): `_checkouts` mode: sbt 2 builds loaded with the consumer's build, other
   builds built like `SourceDep.local` with their modules forced.
 - Roadmap item 3 (part 1): shared cache, on by default (`sourceDepsShared`), with per-slot state,
@@ -434,7 +461,7 @@ contains the real Scaladoc, so no empty jar is needed for Maven Central.
   `JAVA_HOME` honoured by sbt and on the `PATH`; `JAVA_HOME` with Maven, Gradle and scala-cli
   (`java-home`, which also fixed stale scala-cli classes); Mill warns that it ignores `JAVA_HOME`.
 
-**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the nineteen scripted tests above (the sbt 1.x
+**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the twenty scripted tests above (the sbt 1.x
 dependency with sbt 1.13.0).
 
 **Not verified yet**
@@ -454,16 +481,6 @@ Next steps, roughly in priority order:
 3. **`_checkouts` follow-ups** (the mode itself is done and approved: option 1, both mechanisms):
    - modules reached only transitively, without declaring them;
    - check the IntelliJ import by hand (BSP targets were checked with `bspWorkspaceBuildTargets`).
-4. **sbt plugins from source** (requested 2026-10-16). Use the plugin in the meta-build
-   (`project/project/plugins.sbt` + `sourceDependencies` in `project/plugins.sbt`, or a dedicated
-   setting) to build an sbt plugin from a git/local checkout instead of `publishLocal`. Motivating case:
-   a patched Scala Native (arena allocation for classes/case classes, not only pointers) to study and
-   tweak. To investigate:
-   - does it already work, since the meta-build is a project with `allDependencies`?
-   - sbt 2 support of the plugin being built (the consumer runs sbt 2; Scala Native's sbt plugin may
-     only target sbt 1.x), and the `_sbt2_3` artifact naming;
-   - plugins that add libraries of their own version to the main build (Scala Native adds nativelib,
-     javalib, scalalib, the compiler plugin, ... at `nativeVersion`): those come from the same source
-     build, so the main build must resolve them from the isolated repository with the suffixed version;
-   - large multi-module builds with cross Scala versions (Scala Native publishes per Scala version):
-     build time, choosing what to publish (`.args`, a task other than `publish`).
+4. **sbt plugins from source**: done through `_checkouts` (see "sbt plugins from source: Scala
+   Native"). Follow-ups: a scripted test for platform suffixes (checked by hand with Scala Native
+   only); a smaller meta-build footprint (the plugin's build is loaded in full twice).

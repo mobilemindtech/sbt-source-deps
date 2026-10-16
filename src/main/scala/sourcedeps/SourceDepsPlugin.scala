@@ -82,7 +82,14 @@ object SourceDepsPlugin extends AutoPlugin:
       else Seq(MavenRepository("source-deps", (sourceDepsDirectory.value / "repo").toURI.toString))
     },
     // uncached: the up-to-date check must run on every update, never be replayed from the action cache
-    allDependencies := Def.uncached(allDependencies.value ++ sourceDepsResolve.value),
+    // modules replaced by a checkout are not resolved: libraries come through the project dependency,
+    // compiler plugins as jars (scalacOptions)
+    allDependencies := Def.uncached(
+      Checkouts.withoutReplaced(allDependencies.value, Checkouts.replacedModules.value) ++ sourceDepsResolve.value
+    ),
+    excludeDependencies ++= Checkouts.exclusions.value,
+    csrInterProjectDependencies := Def.uncached(csrInterProjectDependencies.value ++ Checkouts.interProjects.value),
+    scalacOptions ++= Checkouts.compilerPluginOptions.value,
     // `1.0.0+src.x` ties with `1.0.0` and loses to `1.0.1`: force the source build over any transitive version
     // _checkouts: the local module wins the same way, over versions declared or requested transitively
     csrConfiguration := Def.uncached {

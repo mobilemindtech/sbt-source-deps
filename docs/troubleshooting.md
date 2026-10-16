@@ -140,6 +140,15 @@ plugin may fail to load: align the versions, or build the library as a
 [source dependency](usage.md#local-directories) instead (`SourceDep.local`), which runs it in its own
 sbt.
 
+## `OutOfMemoryError` with a large checkout
+
+A checkout used by the meta-build and the build (an sbt plugin such as Scala Native) is loaded twice,
+and `reload` holds both while loading again. Raise sbt's heap, for example in `.sbtopts`:
+
+```
+-J-Xmx6G
+```
+
 ## Starting over
 
 ```

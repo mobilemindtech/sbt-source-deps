@@ -184,8 +184,20 @@ and its project ids are unknown before loading:
    source dependencies: otherwise coursier picks a higher published version requested directly or by
    another library, and drops the local module's own dependencies (`dependencyOverrides` is not enough:
    coursier still fetches the declared version).
-3. **`onLoad`** appends `scalaVersion` for the checkout projects whose consumers use one Scala binary
-   version, picked from their `crossScalaVersions`. Appended settings win over the checkout build's
+   Builds with one project per Scala version publish one module from several projects (`nir2_12`,
+   `nir2_13`, `nir3`): the project chosen is one whose `crossScalaVersions` has the consumer's version
+   (`CrossVersion.full`, compiler plugins), or its binary version, preferring the consumer's exact
+   version and never a newer one (Scala 3 reads TASTy only from versions up to its own).
+   The declarations themselves are removed from `allDependencies` (the project dependency brings the
+   module and its dependencies), and excluded when their artifact name differs from the project's.
+   **Compiler plugins** (`addCompilerPlugin`, configuration `plugin`) get no classpath edge: the
+   project's jar is passed as `-Xplugin:`, copied under a name holding its hash, since zinc compares
+   `scalacOptions` but not the plugin's content.
+   **Platforms** (sbt 2's `platform`, `nativelib_native0.5_3`): coursier resolves other projects'
+   modules from `csrInterProjectDependencies`, which only holds the projects reached through
+   `dependsOn`, and falls back to Ivy descriptors named without the platform. The checkout projects'
+   coursier projects are added to `csrInterProjectDependencies`.
+3. **`onLoad`** appends `scalaVersion` for the checkout projects, as chosen above. Appended settings win over the checkout build's
    own, project-level ones included. Appending unloads and loads again, so a state attribute (removed
    by `onUnload`, for `reload`) keeps it from looping, and the summary is logged once.
 

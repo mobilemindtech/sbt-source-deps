@@ -1,0 +1,13 @@
+# every builder receives JAVA_HOME from .javaHome: the dependencies record the JDK they ran on
+> check
+$ exists .source-deps/repo/example/jv-maven
+$ exists .source-deps/repo/example/jv-gradle
+$ exists .source-deps/repo/example/jv-scalacli_3
+
+# another JDK rebuilds them, with nothing left over from the previous build (scala-cli used to keep
+# classes compiled by the first JDK); with no SOURCE_DEPS_TEST_JDK both JDKs are the same
+> set testJdk := file(sys.props("java.home"))
+> check
+
+# scala-cli's state lives in the plugin's working directory, not in the dependency's
+-$ exists jv-scalacli/.scala-build

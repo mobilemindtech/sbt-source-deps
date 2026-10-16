@@ -345,8 +345,12 @@ The environment applies to the build tools only. Git commands run with sbt's env
 
 - `JAVA_HOME` also puts `$JAVA_HOME/bin` first on the `PATH` of the builds, and sbt dependencies get
   `--java-home`: launch scripts (sbt's among them) run the `java` found on the `PATH` and would
-  otherwise ignore it. Mill and scala-cli may still pick their own JVM when the project pins one
-  (`mill-jvm-version`, `//> using jvm`).
+  otherwise ignore it. A JVM pinned by the dependency's own build still wins: Gradle's
+  `gradle/gradle-daemon-jvm.properties`, scala-cli's `//> using jvm`.
+- **Mill ignores `JAVA_HOME`**: Mill 1.x runs on the JVM named by `mill-jvm-version` (in the
+  `build.mill` header, `.mill-jvm-version` or `.config/mill-jvm-version`), or on a JDK it downloads
+  when none is set. Only `mill-jvm-version: system` makes it use `JAVA_HOME`. The plugin never edits the
+  dependency's files, so it only logs a warning when `JAVA_HOME` is set for a Mill dependency.
 - The environment is part of the [fingerprint](how-it-works.md#fingerprint): changing it rebuilds the
   dependencies.
 

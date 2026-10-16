@@ -56,6 +56,7 @@ $ copy-file changes/Greeter.scala greeter/...
 | `mill-cross` | `Cross[...]` modules for 2.13 and 3, consumed by a 2.13 and a 3 project: each gets only its own artifacts |
 | `gradle-kotlin` | `build.gradle.kts` with the `scala` plugin (a Scala 2.13 library, used from Scala 3) |
 | `env-sbt` | `sourceDepsEnv` reaches the build (a source generator reads it); changing it rebuilds; per-dependency `.env(...)` and `.args(...)`; `sourceDepsShowOutput` |
+| `java-home` | `.javaHome(...)` reaches Maven, Gradle and scala-cli (each records the JDK it ran on); switching JDK rebuilds with nothing stale; no `.scala-build` in the dependency. Uses `SOURCE_DEPS_TEST_JDK` as the first JDK when set |
 | `build-errors` | Message when the tool command does not exist, and when an sbt build publishes nothing (`publish / skip`) |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
 | `local-gradle` | Plain `java-library` without publishing configuration |
@@ -63,7 +64,12 @@ $ copy-file changes/Greeter.scala greeter/...
 | `local-scalacli` | `project.scala` with `publish.*` directives; falls back to the `scala` runner |
 
 Requirements: `git`, `mvn`, `gradle` and scala-cli (or `scala` ≥ 3.5) on the `PATH`. The Mill test
-downloads Mill and a JDK on the first run. A full `scripted` run takes about 10 minutes.
+downloads Mill and a JDK on the first run. A full `scripted` run takes about 20 minutes. Set
+`SOURCE_DEPS_TEST_JDK` to a second JDK (e.g. 17) so that `java-home` checks switching JDKs:
+
+```
+SOURCE_DEPS_TEST_JDK=/usr/lib/jvm/java-17 sbt scripted
+```
 
 ## Design decisions and findings
 
@@ -226,6 +232,30 @@ Tried with app → middle (uses the plugin) → greeter. Findings, in order:
   arguments at `-source 17 -target 17`, on JDK 25 and 27, and with `ScalaCompile` options. Not
   investigated further; `gradle-kotlin` uses a Scala 2.13 library.
 
+### `JAVA_HOME` with the other builders (2026-10-15)
+
+Checked by hand with JDK 17, then by the `java-home` scripted test (dependencies record the JDK their
+build ran on: a filtered resource with `java.version` for Maven and Gradle, the class file version of a
+Java source for scala-cli):
+
+- **Maven, Gradle 9.8**: honour `JAVA_HOME`. A `gradle/gradle-daemon-jvm.properties` in the build
+  takes precedence (documented).
+- **scala-cli**: compiles with `JAVA_HOME`, but `publish` kept the Java classes compiled by the
+  previous JDK after `JAVA_HOME` changed (it printed "Compiling ... JVM (27)" and the class stayed at
+  major 61; plain `compile` did recompile). The builder now passes `--workspace` to a directory under
+  the dependency's work dir, emptied before each build: no stale state, and `.scala-build` is no longer
+  written into the dependency's directory. Full rebuilds are fine because builds only run when the
+  fingerprint changed.
+- **Mill 1.3**: ignores `JAVA_HOME`. The launcher picks the daemon JVM from `mill-jvm-version`
+  (`.mill-jvm-version`, `.config/mill-jvm-version`, or the `build.mill` header) and falls back to a
+  default JDK it downloads; only the value `system` uses `java` from the `PATH`/`JAVA_HOME`. No
+  environment variable or flag overrides it (`MillProcessLauncher.javaHome` in mill-runner-launcher
+  1.3.0). Decision: do not write a `.mill-jvm-version` into the dependency (the plugin never modifies
+  it); log a warning when `JAVA_HOME` is set for a Mill dependency, and document it.
+- The test reads the second JDK from `SOURCE_DEPS_TEST_JDK` (the plugin's build passes it as
+  `-Dsource-deps.test.jdk`); without it the test uses the JDK running sbt, which still checks the
+  plumbing and the rebuild but not the switch between JDKs.
+
 ### Hash cache (2026-10-15)
 
 - The fingerprint now hashes the SHA-256 of each file instead of feeding the bytes directly, so a
@@ -272,14 +302,14 @@ contains the real Scaladoc, so no empty jar is needed for Maven Central.
 - Roadmap items 2–3: build duration logged; `sourceDepsShowOutput`; `.args`, `.env`, `.javaHome` per
   dependency (in the fingerprint and in nested records).
 - Roadmap item 1 (tests): Gradle Kotlin DSL + `scala` plugin; `sourceDepsEnv` in the fingerprint;
-  `JAVA_HOME` honoured by sbt and on the `PATH`.
+  `JAVA_HOME` honoured by sbt and on the `PATH`; `JAVA_HOME` with Maven, Gradle and scala-cli
+  (`java-home`, which also fixed stale scala-cli classes); Mill warns that it ignores `JAVA_HOME`.
 
-**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the sixteen scripted tests above (the sbt 1.x
+**Verified** with sbt 2.0.10 on JDK 27 (Linux), by the seventeen scripted tests above (the sbt 1.x
 dependency with sbt 1.13.0).
 
 **Not verified yet**
 - Gradle builds publishing several Scala versions through variants (not supported);
-- `JAVA_HOME` with Maven, Gradle, Mill and scala-cli (checked by hand with sbt only);
 - macOS and Windows (paths, wrapper scripts, `sh` fallback).
 
 ## Roadmap

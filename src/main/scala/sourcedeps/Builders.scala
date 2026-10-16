@@ -215,6 +215,13 @@ object GradleBuilder extends Builder:
 
 object MillBuilder extends Builder:
   def publish(req: BuildRequest): Unit =
+    // Mill 1.x runs on the JVM named by `mill-jvm-version` (or its own default), never on JAVA_HOME,
+    // unless that setting is `system`; the dependency's directory is not modified to change it
+    if req.env.contains("JAVA_HOME") then
+      req.log.warn(
+        s"[source-deps] ${req.label}: Mill ignores JAVA_HOME unless the build sets `mill-jvm-version: system` " +
+          "(in the build.mill header or a .mill-jvm-version file); it runs on the JVM chosen by that setting"
+      )
     val cmd = Builders.launcher(req, BuildTool.Mill, Some("mill")) ++ Seq(
       "--no-server", "--ticker", "false"
     ) ++ req.args ++ Seq("__.publishM2Local", "--m2RepoPath", req.staging.getAbsolutePath)
@@ -226,7 +233,13 @@ object ScalaCliBuilder extends Builder:
     val launcher = Builders.launcher(req, BuildTool.ScalaCli, None) match
       case Seq("scala-cli") if !Builders.onPath("scala-cli") && Builders.onPath("scala") => Seq("scala")
       case other                                                                       => other
+    // A fresh workspace for every build keeps `.scala-build` out of the dependency's directory and drops
+    // incremental state: scala-cli's publish reuses Java classes compiled by another JDK after JAVA_HOME changes
+    val workspace = new File(req.workDir, "scala-cli-workspace")
+    sbt.io.IO.delete(workspace)
+    workspace.mkdirs()
     val cmd = launcher ++ Seq(
-      "--power", "publish", ".", "--publish-repository", Builders.fileUri(req.staging)
+      "--power", "publish", ".", "--workspace", workspace.getAbsolutePath,
+      "--publish-repository", Builders.fileUri(req.staging)
     ) ++ req.args
     Builders.runLogged(req, BuildTool.ScalaCli, cmd)

@@ -11,5 +11,7 @@ lazy val root = (project in file("."))
     // annotation signature lmcoursier was compiled against; 0.2.9+ add parameters and fail
     libraryDependencies += "io.github.alexarchambault" %% "data-class" % "0.2.8" % Provided,
     scriptedLaunchOpts ++= Seq("-Xmx1024M", "-Dplugin.version=" + version.value),
+    // a second JDK for the java-home test (otherwise it uses the JDK running sbt)
+    scriptedLaunchOpts ++= sys.env.get("SOURCE_DEPS_TEST_JDK").map("-Dsource-deps.test.jdk=" + _).toSeq,
     scriptedBufferLog := false
   )

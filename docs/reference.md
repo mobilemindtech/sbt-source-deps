@@ -22,7 +22,7 @@ Every method returns a new `SourceDep`, so calls can be chained.
 | `.buildTool(tool: BuildTool)` | Skip detection. `BuildTool.Sbt`, `Mill`, `Gradle`, `Maven` or `ScalaCli`. |
 | `.args(arguments: String*)` | Extra command-line arguments for this dependency's build tool, placed before the publishing task: `"-Pfast"` (Maven), `"-Pkey=value"` (Gradle), `"-J-Xmx4g"` or `"-Dprop=x"` (sbt). Calls add up. Part of the fingerprint. |
 | `.env(variables: (String, String)*)` | Environment variables for this dependency's build only, over `sourceDepsEnv`. Calls add up. Part of the fingerprint. |
-| `.javaHome(home: File)` | Build this dependency with another JDK. Same as `.env("JAVA_HOME" -> home.getAbsolutePath)`. |
+| `.javaHome(home: File)` | Build this dependency with another JDK. Same as `.env("JAVA_HOME" -> home.getAbsolutePath)`. Ignored by Mill (see [Mill](build-tools.md#mill)). |
 | `.partialClone` | Git only: clone with `--filter=blob:none`. File contents are downloaded on checkout, which is much faster for large repositories with a long history. Checking out another ref then needs the network. Servers without partial clone support get a full clone. |
 | `.named(name: String)` | Name of the dependency's directory under `sourceDepsDirectory`, replacing the computed `<name>-<hash>`. |
 

@@ -1,0 +1,13 @@
+plugins {
+  id 'java-library'
+}
+
+group = 'example'
+version = '1.0.0'
+
+// records the JDK the Gradle daemon runs on
+processResources {
+  def javaVersion = System.getProperty('java.version')
+  inputs.property('javaVersion', javaVersion)
+  filesMatching('jv-gradle.properties') { expand(javaVersion: javaVersion) }
+}

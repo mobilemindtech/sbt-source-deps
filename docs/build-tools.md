@@ -158,7 +158,7 @@ The generated init script does the following for every project with the `java` p
 **Requirements**
 
 - Gradle or `./gradlew`. The Gradle version must support the JDK it runs on; use `sourceDepsEnv` to
-  set `JAVA_HOME` if needed.
+  set `JAVA_HOME` if needed (a `gradle/gradle-daemon-jvm.properties` in the build takes precedence).
 - Android and Kotlin Multiplatform projects are not supported.
 - Set `version` in the build. Without it, Gradle publishes `unspecified`.
 - Groovy and Kotlin DSL (`build.gradle.kts`) both work.
@@ -192,6 +192,9 @@ Every module extending `PublishModule` is published, with its `publishVersion`.
 
 - `./mill` in the project (recommended) or `mill` on the `PATH`. Mill 1.x downloads the Mill version
   declared in `build.mill` and, by default, its own JDK on the first run.
+- The JDK comes from the build's `mill-jvm-version`, not from `JAVA_HOME` (`sourceDepsEnv`,
+  `.javaHome`): Mill uses `JAVA_HOME` only when that setting is `system`. The plugin logs a warning
+  when `JAVA_HOME` is set for a Mill dependency.
 - Modules must extend `PublishModule` and define `pomSettings` and `publishVersion`.
 
 **Example**
@@ -222,11 +225,15 @@ object greeter extends ScalaModule with PublishModule {
 **Command**
 
 ```
-scala-cli --power publish . --publish-repository file:///.../staging
+scala-cli --power publish . --workspace <workdir>/scala-cli-workspace --publish-repository file:///.../staging
 ```
 
 When `scala-cli` is not on the `PATH`, the plugin falls back to `scala`, because since Scala 3.5 the
 `scala` command is scala-cli.
+
+The workspace (`.scala-build`) lives in the plugin's working directory and is emptied before each
+build, so nothing is written into the dependency's directory. The project is compiled with the JDK from `JAVA_HOME` (`sourceDepsEnv`, `.javaHome`), unless it pins
+one with `//> using jvm`.
 
 **Requirements.** The project needs a `project.scala` (used for detection) with its publish settings:
 
@@ -246,9 +253,9 @@ Each tool is covered by a scripted test (`src/sbt-test/source-deps/`):
 | --- | --- | --- |
 | sbt | 2.0.10 | `local-sbt`, `git-sbt`, `git-refs`, `nested-sbt`, `nested-cycle`, `env-sbt` |
 | sbt | 1.13.0 | `sbt1-cross` |
-| Maven | 3.9.9 | `local-maven` (reactor with parent), `maven-revision` (`${revision}`, SNAPSHOT) |
-| Gradle | 9.8.0 | `local-gradle`, `gradle-multi` (multi-project), `gradle-kotlin` (Kotlin DSL, `scala` plugin) |
+| Maven | 3.9.9 | `local-maven` (reactor with parent), `maven-revision` (`${revision}`, SNAPSHOT), `java-home` |
+| Gradle | 9.8.0 | `local-gradle`, `gradle-multi` (multi-project), `gradle-kotlin` (Kotlin DSL, `scala` plugin), `java-home` |
 | Mill | 1.3.0 (via `./mill`) | `local-mill`, `mill-cross` (`Cross` modules, two consumer Scala versions) |
-| scala-cli | 1.16.0 (`scala` runner) | `local-scalacli` |
+| scala-cli | 1.16.0 (`scala` runner) | `local-scalacli`, `java-home` |
 
-All tests ran on JDK 27 (Zulu), Linux.
+All tests ran on JDK 27 (Zulu), Linux; `java-home` also with JDK 17 (Zulu) as the first JDK.

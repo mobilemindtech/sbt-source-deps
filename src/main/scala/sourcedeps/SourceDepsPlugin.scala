@@ -29,6 +29,16 @@ object SourceDepsPlugin extends AutoPlugin:
   import autoImport.*
 
   private val sourceDepsResolved = taskKey[Seq[Resolved]]("Resolution of each source dependency.").withRank(KeyRanks.Invisible)
+  private val sourceDepsCheckoutDeps =
+    settingKey[Seq[SourceDep]]("Entries of _checkouts that sbt 2 cannot load, built like local source dependencies.").withRank(KeyRanks.Invisible)
+  private val sourceDepsCheckoutResolved =
+    taskKey[Seq[Resolved]]("Resolution of the _checkouts entries built with their own tool.").withRank(KeyRanks.Invisible)
+
+  /** Source dependencies and published checkouts (the hidden project of the _checkouts mode has none). */
+  private def allSourceDeps = Def.setting {
+    val checkouts = if Checkouts.sourceDepsCheckoutsHidden.?.value.contains(true) then Nil else sourceDepsCheckoutDeps.value
+    sourceDependencies.value ++ checkouts
+  }
 
   private def moduleId(c: Coordinates): ModuleID = ModuleID(c.groupId, c.artifactId, c.version)
 
@@ -60,14 +70,15 @@ object SourceDepsPlugin extends AutoPlugin:
     },
     sourceDepsCommands := Builders.defaultCommands,
     sourceDepsEnv := Map.empty,
-    sourceDepsShowOutput := false
+    sourceDepsShowOutput := false,
+    sourceDepsCheckoutDeps := Checkouts.published((LocalRootProject / baseDirectory).value)
   )
 
   override def projectSettings: Seq[Setting[?]] = Seq(
     sourceDependencies := Nil,
     allowMismatchScala := allowMismatchScala.value || Checkouts.mismatchAllowed.value,
     resolvers ++= {
-      if sourceDependencies.value.isEmpty then Nil
+      if allSourceDeps.value.isEmpty then Nil
       else Seq(MavenRepository("source-deps", (sourceDepsDirectory.value / "repo").toURI.toString))
     },
     // uncached: the up-to-date check must run on every update, never be replayed from the action cache
@@ -83,7 +94,21 @@ object SourceDepsPlugin extends AutoPlugin:
       conf.withForceVersions(conf.forceVersions ++ forced)
     },
     sourceDepsResolve := Def.uncached(sourceDepsResolved.value.flatMap(_.selected).map(moduleId)),
-    sourceDepsForcedVersions := Def.uncached(sourceDepsResolved.value.flatMap(_.published).distinct.map(moduleId)),
+    // published checkouts are not added as dependencies: forcing their modules replaces the declared ones
+    sourceDepsForcedVersions := Def.uncached(
+      (sourceDepsResolved.value ++ sourceDepsCheckoutResolved.value).flatMap(_.published).distinct.map(moduleId)
+    ),
+    sourceDepsCheckoutResolved := Def.uncached {
+      val e = engine.value(streams.value.log)
+      val binary = scalaBinaryVersion.value
+      val depsEnv = sourceDepsEnv.value
+      val checkouts = allSourceDeps.value.drop(sourceDependencies.value.size)
+      checkouts.map { dep =>
+        val resolved = e.resolve(dep)
+        Nested.record(dep, binary, depsEnv)
+        resolved
+      }
+    },
     sourceDepsResolved := Def.uncached {
       val e = engine.value(streams.value.log)
       val binary = scalaBinaryVersion.value
@@ -96,12 +121,12 @@ object SourceDepsPlugin extends AutoPlugin:
     },
     sourceDepsUpdate := Def.uncached {
       val e = engine.value(streams.value.log)
-      sourceDependencies.value.foreach(e.resolve(_, fetch = true))
+      allSourceDeps.value.foreach(e.resolve(_, fetch = true))
     },
     sourceDepsStatus := Def.uncached {
       val log = streams.value.log
       val e = engine.value(log)
-      sourceDependencies.value.foreach { dep =>
+      allSourceDeps.value.foreach { dep =>
         val status = e.isUpToDate(dep) match
           case Some(true)  => "up to date"
           case Some(false) => "stale (will rebuild)"
@@ -111,6 +136,6 @@ object SourceDepsPlugin extends AutoPlugin:
     },
     sourceDepsClean := Def.uncached {
       val e = engine.value(streams.value.log)
-      sourceDependencies.value.foreach(e.clean)
+      allSourceDeps.value.foreach(e.clean)
     }
   )

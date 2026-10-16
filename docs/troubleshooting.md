@@ -115,6 +115,31 @@ on. Run its builds with another JDK:
 ThisBuild / sourceDepsEnv := Map("JAVA_HOME" -> "/usr/lib/jvm/java-21")
 ```
 
+## `_checkouts`: the checkout is not used
+
+- Run `reload` after adding or removing a directory: checkouts are found while the build loads.
+- `no project declares a module of <name>`: add the library to `libraryDependencies`, with the
+  organization and name its build publishes (`show {file:/.../_checkouts/<name>/}<project>/projectID`).
+  A module reached only through another library must be declared too.
+- `ignoring <name>: no build detected`: the directory holds no build file the plugin knows (`build.sbt`,
+  `pom.xml`, `build.gradle`, `build.mill`, `project.scala`, ...). A symlink must point at the build's
+  root directory.
+
+## `_checkouts`: `Scala version mismatch: app (Scala 3.x) depends on core (Scala 2.13.x)`
+
+The checkout project could not be moved to your Scala version: its `crossScalaVersions` has no entry
+with the same binary version. A project that sets `scalaVersion` itself gets
+`crossScalaVersions := Seq(scalaVersion)` and does not inherit `ThisBuild / crossScalaVersions`: add
+your version to the project's own `crossScalaVersions` in the checkout. (A 2.13-only project used
+from Scala 3 is allowed and needs nothing.)
+
+## `_checkouts`: the build fails to load
+
+The checkout's plugins are loaded with yours. Two builds requiring incompatible versions of one
+plugin may fail to load: align the versions, or build the library as a
+[source dependency](usage.md#local-directories) instead (`SourceDep.local`), which runs it in its own
+sbt.
+
 ## Starting over
 
 ```

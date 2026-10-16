@@ -58,7 +58,7 @@ $ copy-file changes/Greeter.scala greeter/...
 | `env-sbt` | `sourceDepsEnv` reaches the build (a source generator reads it); changing it rebuilds; per-dependency `.env(...)` and `.args(...)`; `sourceDepsShowOutput` |
 | `java-home` | `.javaHome(...)` reaches Maven, Gradle and scala-cli (each records the JDK it ran on); switching JDK rebuilds with nothing stale; no `.scala-build` in the dependency. Uses `SOURCE_DEPS_TEST_JDK` as the first JDK when set |
 | `shared-cache` | Builds go to `sourceDepsSharedDirectory`, not `.source-deps`; two subprojects using the same dependency with different `.env` keep one version each, through rebuilds; `sourceDepsShared := false` goes back to `.source-deps` |
-| `checkouts` | `_checkouts/greeter` (sbt 2, two modules, a project-level 2.13 `scalaVersion` with 3 in `crossScalaVersions`, `scala-xml`, uses this plugin itself) replaces `example:greeter:1.0.0`, published nowhere; compiled with Scala 3; works after `reload`; an edit recompiles incrementally; a non-sbt directory is skipped with a warning; nothing is published |
+| `checkouts` | `_checkouts/greeter` (sbt 2, two modules, a project-level 2.13 `scalaVersion` with 3 in `crossScalaVersions`, `scala-xml`, uses this plugin itself) replaces `example:greeter:1.0.0`, published nowhere; compiled with Scala 3; works after `reload`; an edit recompiles incrementally; `_checkouts/jgreeter` (Maven) replaces `example:jgreeter:1.0.0` through jar mode and is rebuilt after an edit; a directory without a build is skipped with a warning; the sbt checkout is not published |
 | `build-errors` | Message when the tool command does not exist, and when an sbt build publishes nothing (`publish / skip`) |
 | `local-maven` | Reactor with parent; consumer selects `greeter` only; the change is in `greeter-api`, which comes transitively |
 | `local-gradle` | Plain `java-library` without publishing configuration |
@@ -291,7 +291,7 @@ plugin and `ThisBuild` settings) and a consumer:
 - **IDE**: `bspWorkspaceBuildTargets` lists the checkout projects (`core/Compile`, `util/Compile`, ...),
   so Metals indexes the working copy.
 
-Implemented as proposed (branch `checkouts`, see "`_checkouts` mode" below). Proposed design (`_checkouts` mode, sbt 2 dependencies only):
+Implemented as proposed (see "`_checkouts` mode" below), plus non-sbt 2 entries built like `SourceDep.local`. Proposed design (`_checkouts` mode, sbt 2 dependencies only):
 1. Every directory in `<build root>/_checkouts/` (a symlink is fine) that holds an sbt 2 build is
    loaded with the consumer's build; non-sbt or sbt 1 builds are reported and skipped.
 2. A consumer project that declares `libraryDependencies` on a module produced by a checkout project
@@ -303,7 +303,7 @@ Implemented as proposed (branch `checkouts`, see "`_checkouts` mode" below). Pro
 Limits: one Scala version per checkout project (two consumer projects on different Scala versions need
 jar mode), plugin conflicts between builds, nested `_checkouts` ignored.
 
-### `_checkouts` mode (2026-10-16, branch `checkouts`)
+### `_checkouts` mode (2026-10-16)
 
 Findings while implementing the design above (see how-it-works.md for the mechanism):
 
@@ -320,6 +320,9 @@ Findings while implementing the design above (see how-it-works.md for the mechan
 - A project with a project-level `scalaVersion` gets `crossScalaVersions := Seq(scalaVersion)` by
   default and does not inherit `ThisBuild / crossScalaVersions`: such a project is only aligned when it
   declares its own `crossScalaVersions` (which a real cross-built project does).
+- Entries sbt 2 cannot load (asked for by the maintainer: one convention for every library being
+  edited) are resolved like `SourceDep.local`, but only their published modules are forced; nothing is
+  added to `allDependencies`, so the checkout replaces and never adds.
 - `getClass.getResource` from a top-level `@main` does not see the dependencies' resources under
   `run`; the tests use the context class loader.
 
@@ -394,7 +397,8 @@ contains the real Scaladoc, so no empty jar is needed for Maven Central.
 - Roadmap item 4: per-file hash cache (`file-hashes.tsv`), format version 4.
 - Roadmap items 2–3: build duration logged; `sourceDepsShowOutput`; `.args`, `.env`, `.javaHome` per
   dependency (in the fingerprint and in nested records).
-- Roadmap item 3 (part 2, branch `checkouts`): `_checkouts` mode for sbt 2 libraries.
+- Roadmap item 3 (part 2): `_checkouts` mode: sbt 2 builds loaded with the consumer's build, other
+  builds built like `SourceDep.local` with their modules forced.
 - Roadmap item 3 (part 1): shared cache, on by default (`sourceDepsShared`), with per-slot state,
   a version index and a repository lock.
 - Roadmap item 1 (tests): Gradle Kotlin DSL + `scala` plugin; `sourceDepsEnv` in the fingerprint;
@@ -418,10 +422,7 @@ Next steps, roughly in priority order:
    and do: license, developer info, `homepage`/`scmInfo` in the POM, Central Portal namespace and GPG
    key (or `sbt-ci-release`), CI (GitHub Actions running `scripted`; needs Mill, Gradle, Maven and
    scala-cli), release to Maven Central.
-3. **`_checkouts` mode**: implemented on branch `checkouts`, waiting for the maintainer's review of the
-   design (convention directory, no `build.sbt` change). Follow-ups:
-   - non-sbt or sbt 1 entries in `_checkouts/`: build them in jar mode and force their modules
-     (replace-only, without adding them to every project);
+3. **`_checkouts` follow-ups** (the mode itself is done and approved: option 1, both mechanisms):
    - modules reached only transitively, without declaring them;
    - check the IntelliJ import by hand (BSP targets were checked with `bspWorkspaceBuildTargets`).
 4. **sbt plugins from source** (requested 2026-10-16). Use the plugin in the meta-build

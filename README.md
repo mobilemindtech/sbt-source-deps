@@ -24,13 +24,14 @@ don't, nothing is built.
   `./mvnw`, `./mill`) are preferred.
 - **Rebuild only on change.** The trigger is a content hash of the dependency's sources.
 - **Reproducible git builds.** Branches only move when you run `sourceDepsUpdate`.
-- **Isolated.** `~/.m2` and `~/.ivy2` are never touched, and your local directories are never modified.
+- **Isolated.** `~/.m2` and `~/.ivy2` are never touched, and the sources of your local directories
+  are never modified (sbt writes its usual `target/` directories in sbt 2 checkouts).
 - **The source build always wins** over other versions of the same module brought in transitively.
 - **Scala cross-versions.** For sbt dependencies, the plugin picks the `crossScalaVersions` entry that
   matches your project's Scala version.
-- **`_checkouts` for sbt 2 libraries.** Put (or symlink) a library's build in `_checkouts/`: it
-  replaces the published module you declare, compiles incrementally with your project and shows up in
-  the IDE. Nothing is published, and `build.sbt` does not change.
+- **`_checkouts`.** Put (or symlink) a library's build in `_checkouts/`: it replaces the published
+  modules you declare, and `build.sbt` does not change. An sbt 2 library compiles incrementally with
+  your project and shows up in the IDE; other tools are built like source dependencies.
 - **Safe for concurrent sessions.** sbt, Metals and other sessions can share the directory, because
   builds are serialized with a file lock.
 

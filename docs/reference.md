@@ -76,6 +76,8 @@ Build-scoped settings are set with `ThisBuild / ...`. Values can include extra a
 | `sourceDepsStatus` | Logs `up to date`, `stale (will rebuild)` or `not checked out` for each dependency, without building. |
 | `sourceDepsClean` | Deletes each dependency's directory (clone included) and its published artifacts. |
 
+These tasks also cover the `_checkouts` entries built with their own tool (non-sbt 2 builds).
+
 ### `sourceDepsForcedVersions`
 
 These versions are passed to coursier as forced versions (`csrConfiguration`'s `forceVersions`).
@@ -87,7 +89,11 @@ Wherever a forced module appears in the dependency graph, it resolves to the sou
 | --- | --- |
 | `resolvers` | Adds the Maven repository `source-deps` at `<sourceDepsDirectory>/repo` when the project has source dependencies. |
 | `allDependencies` | Appends `sourceDepsResolve`. |
-| `csrConfiguration` | Appends `sourceDepsForcedVersions` to the forced versions. |
+| `csrConfiguration` | Appends `sourceDepsForcedVersions` and the `_checkouts` modules to the forced versions. |
+| `allowMismatchScala` | `true` when the project uses a 2.13-only checkout project from Scala 3. |
+| `Global / buildDependencies` | Adds the edges from your projects to the sbt 2 checkout projects. |
+| `Global / onLoad`, `Global / onUnload` | Align the Scala version of the checkout projects; log the checkouts in use. |
+| `extraProjects` | The hidden `sourceDepsCheckouts` project, when `_checkouts/` holds an sbt 2 build. |
 
 These tasks are **uncached** (`Def.uncached`), so sbt 2's action cache never replays them. The
 up-to-date check runs on every `update`. When nothing changed, its cost is hashing the dependencies'
@@ -97,7 +103,7 @@ files.
 
 | Item | Description |
 | --- | --- |
-| `<build root>/_checkouts/<name>/` | An sbt 2 build (or a symlink to one) loaded with the consumer's build. See [usage](usage.md#editing-a-library-in-place-_checkouts). |
+| `<build root>/_checkouts/<name>/` | A build (or a symlink to one). sbt 2 builds are loaded with the consumer's build; others are built like `SourceDep.local` and their modules forced. See [usage](usage.md#editing-a-library-in-place-_checkouts). |
 | `-Dsbt.source-deps.checkouts=<dir>`, `SBT_SOURCE_DEPS_CHECKOUTS=<dir>` | Another directory, absolute or relative to the build root. |
 | Project `sourceDepsCheckouts` | Added to the build (hidden, `publish / skip`) when `_checkouts/` holds a build: it makes sbt load the checkout builds. |
 | `allowMismatchScala` | Set to `true` on projects that use a 2.13-only checkout project from Scala 3. |

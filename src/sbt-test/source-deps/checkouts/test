@@ -1,12 +1,18 @@
-# the checkout replaces example:greeter, which is published nowhere. The checkout uses this plugin
-# too (its project/plugins.sbt), so its build also runs the plugin's load-time hooks
-> run v1
+# the checkouts replace example:greeter and example:jgreeter, which are published nowhere.
+# greeter is an sbt 2 build using this plugin too (its project/plugins.sbt): loaded with this build.
+# jgreeter is a Maven build: built with Maven into the isolated repository
+> run v1/java-v1
+$ exists .source-deps/repo/example/jgreeter
 
 # a reload keeps everything working (the Scala version is aligned again)
 > reload
-> run v1
+> run v1/java-v1
 
-# an edit in the checkout is compiled incrementally on the next run: no publishing
+# an edit in the sbt checkout is compiled incrementally on the next run, without publishing
 $ copy-file changes/Util.scala _checkouts/greeter/util/src/main/scala/greeter/Util.scala
-> run v1!
--$ exists .source-deps
+> run v1!/java-v1
+-$ exists .source-deps/repo/example/greeter_3
+
+# an edit in the Maven checkout rebuilds it
+$ copy-file changes/JGreeter.java _checkouts/jgreeter/src/main/java/jgreeter/JGreeter.java
+> run v1!/java-v2

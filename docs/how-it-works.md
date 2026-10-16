@@ -165,7 +165,11 @@ its own `.source-deps`, and the outer build fails to resolve them.
 
 ## `_checkouts`
 
-The checkout builds become part of the consumer's build, so sbt compiles them like its own projects.
+Entries that sbt 2 cannot load (sbt 1, Maven, Gradle, Mill, scala-cli) go through the same engine as
+`SourceDep.local`, with one difference: their modules are only added to the forced versions, never to
+the dependencies, so they replace what the build already depends on.
+
+sbt 2 checkout builds become part of the consumer's build, so sbt compiles them like its own projects.
 Three steps, because sbt only loads an external build when a project of the root build refers to it,
 and its project ids are unknown before loading:
 

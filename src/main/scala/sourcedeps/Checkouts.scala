@@ -30,7 +30,10 @@ private[sourcedeps] object Checkouts:
   final case class Link(consumer: ProjectRef, checkout: ProjectRef)
 
   enum Entry:
+    /** An sbt 2 build: loaded with the consumer's build. */
     case Build(dir: File)
+    /** Another tool or sbt 1: built and published like `SourceDep.local`, its modules forced. */
+    case Published(dir: File, tool: BuildTool)
     case Skipped(dir: File, reason: String)
 
   /** `<root>/_checkouts`, or the directory named by the property/variable (relative to the build root). */
@@ -46,15 +49,17 @@ private[sourcedeps] object Checkouts:
       .filter(f => f.isDirectory && !f.getName.startsWith("."))
       .sortBy(_.getName)
       .map { dir =>
-        val isSbt = new File(dir, "build.sbt").isFile || new File(dir, "project/build.properties").isFile
-        if !isSbt then Entry.Skipped(dir, "not an sbt build (only sbt 2 builds can be checkouts; use SourceDep.local for other tools)")
-        else
-          sbtVersion(dir) match
-            case Some(v) if !v.startsWith("2.") => Entry.Skipped(dir, s"sbt $v build (sbt 2 cannot load it; use SourceDep.local)")
-            case _                               => Entry.Build(dir)
+        Builders.detect(dir) match
+          case Some(BuildTool.Sbt) if !sbtVersion(dir).exists(v => !v.startsWith("2.")) => Entry.Build(dir)
+          case Some(tool)                                                                => Entry.Published(dir, tool)
+          case None                                                                      => Entry.Skipped(dir, "no build detected")
       }
 
   def builds(buildRoot: File): Seq[File] = entries(buildRoot).collect { case Entry.Build(dir) => dir }
+
+  /** Checkouts that sbt 2 cannot load, as source dependencies built with their own tool. */
+  def published(buildRoot: File): Seq[SourceDep] =
+    entries(buildRoot).collect { case Entry.Published(dir, tool) => SourceDep.local(dir).buildTool(tool) }
 
   private def sbtVersion(dir: File): Option[String] =
     val f = new File(dir, "project/build.properties")
@@ -185,7 +190,10 @@ private[sourcedeps] object Checkouts:
     val root = extracted.get(LocalRootProject / baseDirectory)
     entries(root).foreach {
       case Entry.Skipped(dir, reason) => log.warn(s"[source-deps] _checkouts: ignoring ${dir.getName}: $reason")
-      case Entry.Build(_)             => ()
+      case Entry.Published(dir, tool) =>
+        val how = if tool == BuildTool.Sbt then "an sbt 1 build" else s"a ${tool.toString.toLowerCase} build"
+        log.info(s"[source-deps] _checkouts: ${dir.getName} is $how: built with its own tool, its modules replace the published ones")
+      case Entry.Build(_) => ()
     }
     val ls = extracted.get(Global / sourceDepsCheckoutLinks)
     val (_, external) = extracted.get(Global / sourceDepsCheckoutProjects)

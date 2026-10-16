@@ -243,9 +243,8 @@ See [how it works](how-it-works.md#dependencies-that-use-the-plugin) for the det
 
 ## Editing a library in place (`_checkouts`)
 
-To change a library and test it from your project at once, without publishing it anywhere, put its
-sbt 2 build in `_checkouts/` at the root of your build, like rebar3's `_checkouts`. A symlink is the
-usual way:
+To change a library and test it from your project at once, put its build in `_checkouts/` at the root
+of your build, like rebar3's `_checkouts`. A symlink is the usual way:
 
 ```
 app/
@@ -259,6 +258,15 @@ $ mkdir -p _checkouts && ln -s ~/src/greeter _checkouts/greeter
 sbt> reload
 [info] [source-deps] _checkouts: core (greeter, Scala 3.8.4) replaces its published module in app
 ```
+
+How a checkout is used depends on its build:
+
+| Checkout | How | Edit -> test |
+| --- | --- | --- |
+| sbt 2 build | Loaded **in your build**: its projects replace the modules | Incremental compilation, IDE on the working copy |
+| sbt 1, Maven, Gradle, Mill, scala-cli | Built with its own tool and published to the isolated repository, like [`SourceDep.local`](#local-directories); its modules **replace** the declared ones, nothing is added | A full build of the checkout when its sources change |
+
+For sbt 2 checkouts:
 
 - The library's build is loaded **together with yours**. Each project of yours that declares a module
   produced by a checkout project (`example:greeter`, matched by organization and name) depends on that
@@ -274,10 +282,13 @@ sbt> reload
   keeps its own. A 2.13-only project can be used from Scala 3.
 - To go back to the released version, remove the directory (or the symlink) and `reload`.
 
-Limits:
+For other builds, every module the checkout publishes replaces the same module wherever it appears,
+transitively included, through [forced versions](how-it-works.md#forced-versions). Unlike a
+`sourceDependencies` entry, the checkout adds nothing: a module nobody depends on is just ignored.
+Directories without a recognized build are skipped with a warning.
 
-- **sbt 2 builds only.** sbt 1 builds and other tools are skipped with a warning; use
-  [`SourceDep.local`](#local-directories) for them (built and published to the isolated repository).
+Limits (sbt 2 checkouts):
+
 - A module reached **only transitively** (through another library) is replaced once you declare it in
   `libraryDependencies` too.
 - A checkout project compiles with **one** Scala version: two projects of yours on different Scala
@@ -286,6 +297,9 @@ Limits:
   Conflicting plugin versions between both builds may fail to load.
 - Once `_checkouts/` holds a build, sbt names your implicit root project `<directory>-root` (it does so
   whenever a build has more than one project). Builds that declare their root project keep its name.
+- sbt writes the checkout's meta-build output (`project/target/`, `project/project/`) and, when the
+  checkout uses this plugin too, an empty `target/source-deps-checkouts/` in the checkout, as it does
+  for any build it loads. The checkout's classes go to your build's `target/`.
 - The directory can be changed with `-Dsbt.source-deps.checkouts=<dir>` or
   `SBT_SOURCE_DEPS_CHECKOUTS=<dir>` (relative to the build root).
 
@@ -511,3 +525,4 @@ into the dependency works. It opens the published sources, not your working copy
 | `sourceDepsClean` | Delete clones and published artifacts; the next build starts from scratch |
 | `show sourceDepsResolve` | List the modules added to the project |
 | `show sourceDepsForcedVersions` | List every module forced to its source version |
+| `reload` | Pick up a directory added to or removed from `_checkouts/` |

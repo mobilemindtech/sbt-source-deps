@@ -104,4 +104,24 @@ app> sbt sourceDepsUpdate
 [info] [source-deps] building https://github.com/example/greeter.git@main with sbt (first build)
 ```
 
+## 6. Edit the library in place
+
+While you work on `greeter` and `app` at the same time, you can skip `sourceDependencies` entirely: keep
+the regular `libraryDependencies` and link the library into `_checkouts/`:
+
+```scala
+// app/build.sbt
+libraryDependencies += "example" %% "greeter" % "1.0.0"
+```
+
+```
+app$ mkdir -p _checkouts && ln -s ../../greeter _checkouts/greeter
+app$ sbt run
+[info] [source-deps] _checkouts: greeter (greeter, Scala 3.8.4) replaces its published module in app
+```
+
+`greeter` is an sbt 2 build, so it is loaded with `app`'s build: an edit in `greeter` is compiled
+incrementally on the next `run`, and the IDE opens your working copy. Remove the symlink and `reload`
+to go back to the released version. See [`_checkouts`](usage.md#editing-a-library-in-place-_checkouts).
+
 Next: [Usage and examples](usage.md).

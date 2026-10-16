@@ -251,9 +251,9 @@ Each tool is covered by a scripted test (`src/sbt-test/source-deps/`):
 
 | Tool | Version | Test |
 | --- | --- | --- |
-| sbt | 2.0.10 | `local-sbt`, `git-sbt`, `git-refs`, `nested-sbt`, `nested-cycle`, `env-sbt` |
+| sbt | 2.0.10 | `local-sbt`, `git-sbt`, `git-refs`, `nested-sbt`, `nested-cycle`, `env-sbt`, `shared-cache`, `checkouts` (sbt 2 checkout) |
 | sbt | 1.13.0 | `sbt1-cross` |
-| Maven | 3.9.9 | `local-maven` (reactor with parent), `maven-revision` (`${revision}`, SNAPSHOT), `java-home` |
+| Maven | 3.9.9 | `local-maven` (reactor with parent), `maven-revision` (`${revision}`, SNAPSHOT), `java-home`, `checkouts` (Maven checkout) |
 | Gradle | 9.8.0 | `local-gradle`, `gradle-multi` (multi-project), `gradle-kotlin` (Kotlin DSL, `scala` plugin), `java-home` |
 | Mill | 1.3.0 (via `./mill`) | `local-mill`, `mill-cross` (`Cross` modules, two consumer Scala versions) |
 | scala-cli | 1.16.0 (`scala` runner) | `local-scalacli`, `java-home` |

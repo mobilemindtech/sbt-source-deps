@@ -303,6 +303,35 @@ Implemented as proposed (see "`_checkouts` mode" below), plus non-sbt 2 entries 
 Limits: one Scala version per checkout project (two consumer projects on different Scala versions need
 jar mode), plugin conflicts between builds, nested `_checkouts` ignored.
 
+### Spike: sbt plugins from source (2026-10-16)
+
+- **Already works with `_checkouts`** for an sbt 2 plugin build (`plugin` project with `SbtPlugin`, plus
+  a `runtime` library the plugin adds to its users' `libraryDependencies`, the shape of Scala Native):
+  - `project/project/plugins.sbt` adds sbt-source-deps to the meta-build, so `project/plugins.sbt` can
+    declare `addSbtPlugin("example" % "sbt-hello" % "1.0.0")` (published nowhere): the meta-build loads
+    `<root>/_checkouts/hello` too (the checkouts directory comes from `user.dir`) and links its
+    `plugin` project;
+  - `project/plugins.sbt` also adds sbt-source-deps for the main build, whose `runtime` link replaces the
+    `hello-runtime` the plugin adds;
+  - one `_checkouts/hello` serves both levels. Editing the runtime recompiles incrementally on the next
+    `run`; editing the plugin needs `reload`, which recompiles only the changed file.
+- **Jar mode is a poor fit** for plugins that add their own libraries: the plugin adds them at its
+  original version (`BuildInfo.version`), not at the `+src.<hash>` version.
+- **Scala Native** (the maintainer's clone runs on sbt 2.0.9 and cross-builds its plugin for sbt 2 with
+  Scala 3.8.4): 113 projects, one per module and Scala version (`nir2_12`, `nir2_13`, `nir3`,
+  `sbtScalaNative3`, `nativelib3`, ...); the first load takes about 2 minutes. What `_checkouts` lacks:
+  1. **Several projects with the same module name**: matching by organization and name links all of
+     them. Pick the project whose artifact name for some version of its `crossScalaVersions` equals the
+     declared one (`nativelib_native0.5_3`, `sbt-scala-native_sbt2_3`, `nscplugin_3.8.4`), and align it
+     to that version.
+  2. **Compiler plugins** (`nscplugin`, added with `addCompilerPlugin`, configuration `plugin`): a
+     classpath edge is wrong, and the module at the checkout's version is published nowhere. Pass the
+     linked project's packaged jar as `-Xplugin:` and drop the declaration from resolution.
+  3. **Versions embedding the Scala version** (`scalalib` is published as `<scala>+<native>`): to check
+     against the project's `projectID`.
+  4. **Cost**: the main build compiles `javalib` and `scalalib` (the Scala standard library for Native)
+     from source once; later runs are incremental.
+
 ### `_checkouts` mode (2026-10-16)
 
 Findings while implementing the design above (see how-it-works.md for the mechanism):

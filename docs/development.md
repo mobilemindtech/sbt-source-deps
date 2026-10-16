@@ -287,7 +287,10 @@ dependency with sbt 1.13.0).
 Next steps, roughly in priority order:
 
 1. **Tests for what is not verified yet** (list above).
-2. **Publishing the plugin**: Scaladoc fixed (data-class 0.2.8, Provided); still to do: POM metadata, CI
-   (GitHub Actions running `scripted`), release to Maven Central.
+2. **Publishing the plugin** (postponed by the maintainer, 2026-10-15): Scaladoc fixed (data-class
+   0.2.8, Provided). Repository: <https://github.com/mobilemindtech/sbt-source-deps>. Still to decide
+   and do: license, developer info, `homepage`/`scmInfo` in the POM, Central Portal namespace and GPG
+   key (or `sbt-ci-release`), CI (GitHub Actions running `scripted`; needs Mill, Gradle, Maven and
+   scala-cli), release to Maven Central.
 3. **Optional**: `ProjectRef` mode for sbt 2 dependencies (same build, incremental compilation, IDE
    navigation into sources), and a global shared cache directory.
